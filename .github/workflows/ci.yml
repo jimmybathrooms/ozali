@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [16, 18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # CERO dependencias: no hay nada que instalar. Corremos los tests directo.
+      - name: Run smoke tests
+        run: node --test cli/test/*.test.mjs
+
+  security-invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verificar cero dependencias y cero lifecycle scripts
+        run: |
+          node -e '
+            const p = require("./package.json");
+            const deps = Object.keys(p.dependencies || {});
+            if (deps.length) { console.error("FALLA: el paquete tiene dependencias:", deps); process.exit(1); }
+            const bad = ["preinstall","install","postinstall","preuninstall","postuninstall","prepare"].filter(s => p.scripts && p.scripts[s]);
+            if (bad.length) { console.error("FALLA: lifecycle scripts presentes:", bad); process.exit(1); }
+            console.log("OK: cero dependencias y cero lifecycle scripts.");
+          '
+      - name: Smoke del CLI sin scripts (simula pnpm dlx seguro)
+        run: |
+          node cli/bin/ozali.mjs --version
+          node cli/bin/ozali.mjs --help | grep -q "ozali"

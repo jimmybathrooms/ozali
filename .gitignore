@@ -1,0 +1,17 @@
+# Histórico aislado: nunca se commitea en el repo principal del proyecto.
+# (En el repo de la HERRAMIENTA ozali esto casi no aplica, pero se documenta el patrón
+#  que el CLI inyecta en el .gitignore de los repos destino.)
+.ozali/
+.engram/
+
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/

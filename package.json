@@ -1,0 +1,39 @@
+{
+  "name": "ozali",
+  "version": "0.1.0",
+  "description": "Bootstrap interactivo de IA por equipo: calibra el proyecto, genera la skill de ejecución (cdk) con TDD/SDD, y mantiene memoria de equipo (Engram) con histórico aislado.",
+  "type": "module",
+  "bin": {
+    "ozali": "cli/bin/ozali.mjs"
+  },
+  "scripts": {
+    "test": "node --test cli/test/*.test.mjs"
+  },
+  "files": [
+    "cli/",
+    "skill/",
+    "docs/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "tdd",
+    "sdd",
+    "claude-code",
+    "opencode",
+    "engram",
+    "bootstrap",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT",
+  "author": "Jaime Baños",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jaimebanos/ozali.git"
+  },
+  "dependencies": {}
+}
