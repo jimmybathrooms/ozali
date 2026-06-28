@@ -24,8 +24,10 @@ ${c.bold("Opciones comunes:")}
   --agent <a>          (init) claude-code | opencode | both.
   --scope <s>          (init) project | global.
   --knowledge-repo <p> (init) Ruta del repo de conocimiento.
+  --no-engram          (init) No instalar Engram; arranca en modo docs.
   --import             (sync) Importa del repo de conocimiento a local.
   --push               (sync) Hace push al remoto del repo de conocimiento.
+  --cloud              (sync) Replica también a Engram Cloud (si está habilitado).
   -h, --help           Esta ayuda.    -v, --version   Versión.
 
 ${c.bold("Instalación segura:")}
@@ -42,6 +44,8 @@ function parseArgs(argv) {
     else if (a === "--dry-run") opts.dryRun = true;
     else if (a === "--import") opts.import = true;
     else if (a === "--push") opts.push = true;
+    else if (a === "--cloud") opts.cloud = true;
+    else if (a === "--no-engram") opts.noEngram = true;
     else if (a === "--agent") opts.agent = argv[++i];
     else if (a === "--scope") opts.scope = argv[++i];
     else if (a === "--knowledge-repo") opts.knowledgeRepo = argv[++i];

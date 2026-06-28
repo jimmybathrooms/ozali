@@ -57,12 +57,20 @@ test("doctor en proyecto vacío reporta pendientes (exit 1)", () => {
 test("init --yes instala la skill, aísla el histórico y escribe config", () => {
   const dir = tmpProject();
   try {
-    run(["init", "--yes", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    run(["init", "--yes", "--no-engram", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
     assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "ozali", "SKILL.md")), "SKILL.md instalada");
     assert.ok(fs.existsSync(path.join(dir, ".ozali", "config.json")), "config escrita");
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".ozali", "config.json"), "utf8"));
+    assert.equal(cfg.memoryMode, "docs", "--no-engram deja modo docs");
     const gi = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
     assert.match(gi, /\.ozali\//);
     assert.match(gi, /\.engram\//);
+    // perfil base de permisos de Claude Code
+    const settingsPath = path.join(dir, ".claude", "settings.json");
+    assert.ok(fs.existsSync(settingsPath), "settings.json de Claude Code escrito");
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    assert.ok(Array.isArray(settings.permissions.allow) && settings.permissions.allow.length > 0, "allow no vacío");
+    assert.ok(settings.permissions.deny.includes("Bash(rm -rf *)"), "deny bloquea rm -rf");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -71,7 +79,7 @@ test("init --yes instala la skill, aísla el histórico y escribe config", () =>
 test("init --dry-run no escribe nada", () => {
   const dir = tmpProject();
   try {
-    run(["init", "--dry-run", "--yes"], dir);
+    run(["init", "--dry-run", "--yes", "--no-engram"], dir);
     assert.ok(!fs.existsSync(path.join(dir, ".ozali")), "no debe crear .ozali en dry-run");
     assert.ok(!fs.existsSync(path.join(dir, ".claude")), "no debe crear .claude en dry-run");
   } finally {

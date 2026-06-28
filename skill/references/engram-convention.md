@@ -33,6 +33,44 @@ Sin remoto, el nombre de carpeta. Mantén UN nombre por proyecto (evita drift `m
 
 ---
 
+## 1.5. Memoria de equipo (scope + idioma)
+
+La memoria de Engram es **compartida**: lo que un dev guarda en `scope: project` lo recuperan los
+agentes de sus compañeros tras `ozali sync` / `ozali sync --import`. Dos convenciones son
+**obligatorias** para que esa memoria compartida sirva como herramienta de equipo.
+
+### Scope: `project` vs `personal`
+
+| Guarda como `scope: project` | Guarda como `scope: personal` |
+|---|---|
+| Decisiones de arquitectura y trade-offs | Notas y aprendizajes personales |
+| Bugfixes que afectan a otros | Atajos de editor / dotfiles |
+| Convenciones, naming, *gotchas* del repo | Preferencias de estilo o workflow |
+| Contratos de API, quirks de despliegue | Enlaces para releer luego |
+| Contexto de onboarding | TODOs y recordatorios personales |
+
+> Regla rápida: **si el agente de un compañero debería encontrarlo, es `scope: project`.** Todos los
+> artefactos automáticos de `cdk` (§2) van en `scope: project`.
+
+> ⚠️ **El sync exporta AMBOS scopes.** Hoy `scope` filtra búsqueda, **no** transporte: al sincronizar
+> un proyecto se comparten también sus observaciones `personal`. Si necesitas notas verdaderamente
+> privadas, guárdalas bajo **otro nombre de proyecto** (p. ej. `tu-nombre-notas`) que no sincronices,
+> o no las pongas en Engram.
+
+### Idioma de la memoria compartida: **español**
+
+FTS5 (el buscador de Engram) **no es multilingüe**: una búsqueda en un idioma no matchea memorias
+guardadas en otro. Por eso este equipo fija una **lingua franca** para `scope: project`:
+
+- **`scope: project` → siempre en español.** Títulos, `topic_key` semánticos y contenido.
+- **`scope: personal` → cualquier idioma** (nadie más busca tu scope personal).
+
+> 🔑 **Regla de consistencia:** como elegimos español, **tanto al guardar como al buscar**
+> `scope: project` se usa español. Una `mem_search` en inglés sobre memoria guardada en español
+> **no devuelve nada** — la búsqueda se fragmenta y la memoria de equipo deja de funcionar.
+
+---
+
 ## 2. Naming determinista
 
 Todos los artefactos de `cdk` en Engram siguen:

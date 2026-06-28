@@ -46,17 +46,35 @@ npx --ignore-scripts ozali@<versión> init
 git clone <repo> && node ozali/cli/bin/ozali.mjs init
 ```
 
+> **`dlx`/`npx` son efímeros:** ejecutan `init` pero **no dejan `ozali` en tu PATH**. Para usar
+> `ozali doctor`/`update`/`sync` después, instala globalmente (el propio `init` te lo recuerda):
+>
+> ```bash
+> pnpm add -g ozali@<versión>      # recomendado
+> npm install -g ozali@<versión>
+> ```
+
 ### Uso del CLI
 
 ```bash
-ozali init      # detecta agente, instala la skill, aísla el histórico, configura Engram
-ozali doctor    # health-check read-only (fuente de verdad, Engram, Strict TDD, runner…)
+ozali init      # detecta agente, instala la skill, aísla el histórico, instala+configura Engram
+ozali doctor    # health-check read-only (fuente de verdad, Engram, Cloud, Strict TDD, runner…)
 ozali update    # actualiza la skill instalada a la versión del paquete
 ozali sync      # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
 ```
 
-Flags útiles: `--yes` (no interactivo), `--dry-run` (init sin escribir), `--agent`, `--scope`,
-`--knowledge-repo`, `--import`/`--push` (sync). Modelo mental completo en
+`init` también escribe un **perfil base de permisos** (`.claude/settings.json` para Claude Code,
+`opencode.json` para opencode) para reducir confirmaciones: deja libres comandos seguros y bloquea
+los destructivos. Es un template — tus reglas se conservan al re-correr `init`.
+
+`init` también **instala Engram** y registra su MCP con `engram setup <agente>`: en modo
+interactivo te pregunta (default sí), y con `--yes` lo instala automáticamente. Usa brew en
+macOS/Linux, `go install` en Windows, con binario precompilado como fallback. Si prefieres no
+instalarlo, pasa `--no-engram` (arranca en modo `docs`). Opcionalmente habilita **Engram Cloud**
+(réplica de equipo opt-in) además del git-sync.
+
+Flags útiles: `--yes` (no interactivo), `--dry-run` (init sin escribir), `--no-engram`, `--agent`,
+`--scope`, `--knowledge-repo`, `--import`/`--push`/`--cloud` (sync). Modelo mental completo en
 [docs/intended-usage.md](docs/intended-usage.md).
 
 ## Agentes soportados
@@ -68,6 +86,7 @@ Claude Code y opencode (perfiles de permisos para ambos en
 
 | Tema | Doc |
 |---|---|
+| Guía de uso (usuarios generales) | [docs/guia-de-uso.md](docs/guia-de-uso.md) |
 | Uso previsto (modelo mental) | [docs/intended-usage.md](docs/intended-usage.md) |
 | Seguridad del instalador (npx/pnpm) | [docs/security.md](docs/security.md) |
 | Histórico aislado y memoria de equipo | [docs/team-history.md](docs/team-history.md) |

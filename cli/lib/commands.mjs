@@ -4,7 +4,8 @@ import path from "node:path";
 import {
   c, ok, warn, err, info, step,
   SKILL_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
-  ensureGitignore, tryExec, projectName, pkgVersion, DEFAULT_KNOWLEDGE,
+  ensureGitignore, tryExec, spawnCmd, which,
+  projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME,
 } from "./util.mjs";
 import { detectAll } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
@@ -47,14 +48,46 @@ export async function init(cwd, opts) {
   const knowledgeRepo = opts.knowledgeRepo || await ask("Ruta del repo de conocimiento (histórico aislado)", DEFAULT_KNOWLEDGE);
 
   // Engram
-  let memoryMode = "hybrid";
+  let memoryMode = "docs";
   if (env.engram.available) {
+    memoryMode = "hybrid";
     ok(`Engram disponible (${env.engram.bin}). Modo de memoria: ${c.bold("hybrid")} (docs + Engram).`);
   } else {
-    memoryMode = "docs";
-    warn("Engram no está instalado. Arrancamos en modo " + c.bold("docs") + " (solo documentos legibles).");
-    info("Para activar memoria buscable/acumulativa instala Engram: " + c.cyan("https://github.com/Gentleman-Programming/engram"));
-    info("Tras instalarlo, vuelve a correr " + c.bold("ozali doctor") + " — el modo subirá a hybrid automáticamente.");
+    warn("Engram no está instalado.");
+    // Decisión de instalar: --no-engram/--dry-run nunca instalan; --yes usa el default (sí);
+    // interactivo pregunta.
+    if (opts.dryRun && !opts.noEngram) info("(dry-run) Aquí instalaría y configuraría Engram.");
+    const installNow = (opts.noEngram || opts.dryRun) ? false
+      : (opts.yes ? true : await confirm("¿Instalo y configuro Engram ahora?", true));
+    if (installNow) {
+      if (opts.yes) info("Modo no interactivo: instalando Engram automáticamente…");
+      const installed = installEngram();
+      if (installed) {
+        if (agent === "claude-code" || agent === "both") {
+          info("Registrando MCP en Claude Code…");
+          spawnCmd("engram", ["setup", "claude-code"]);
+        }
+        if (agent === "opencode" || agent === "both") {
+          info("Registrando MCP en opencode…");
+          spawnCmd("engram", ["setup", "opencode"]);
+        }
+        memoryMode = "hybrid";
+        ok("Engram listo. Modo de memoria: " + c.bold("hybrid") + ".");
+        info("Reinicia tu agente para que cargue el servidor MCP de Engram.");
+      } else {
+        warn("Instalación no completada. Continúo en modo " + c.bold("docs") + ".");
+        printEngramManualInstructions(agent);
+      }
+    } else {
+      info("Modo " + c.bold("docs") + " activo. Cuando instales Engram, corre " + c.bold("ozali doctor") + " para activar hybrid.");
+      printEngramManualInstructions(agent);
+    }
+  }
+
+  // Engram Cloud (opt-in) — réplica de equipo además del git-sync. Solo si Engram quedó disponible.
+  let cloud = { enabled: false };
+  if (memoryMode === "hybrid" && !opts.dryRun) {
+    cloud = await maybeEnableEngramCloud(projectName(cwd), opts);
   }
 
   if (opts.dryRun) { warn("--dry-run: no escribo nada. Plan mostrado arriba."); return 0; }
@@ -67,7 +100,10 @@ export async function init(cwd, opts) {
   copyDir(SKILL_SRC, target);
   ok(`Skill instalada en ${c.bold(path.relative(cwd, target) || target)}.`);
 
-  // 2) opencode: perfil base de permisos (idempotente, merge mínimo)
+  // 2) perfiles base de permisos (idempotentes, merge mínimo) por agente
+  if (agent === "claude-code" || agent === "both") {
+    ensureClaudeCodeProfile(cwd, scope);
+  }
   if (agent === "opencode" || agent === "both") {
     ensureOpencodeProfile(cwd);
   }
@@ -92,7 +128,7 @@ export async function init(cwd, opts) {
 
   // 5) config local (gitignored)
   const config = {
-    version: pkgVersion(), agent, scope, knowledgeRepo, memoryMode,
+    version: pkgVersion(), agent, scope, knowledgeRepo, memoryMode, cloud,
     project: projectName(cwd), createdAt: new Date().toISOString(),
   };
   writeJSON(CONFIG_PATH(cwd), config);
@@ -100,11 +136,151 @@ export async function init(cwd, opts) {
 
   // --- siguientes pasos ---
   step("Siguientes pasos");
+  // Detect if ozali is NOT permanently in PATH (i.e., run via pnpm dlx / npx without global install).
+  if (!which("ozali")) {
+    const v = pkgVersion();
+    warn("ozali no está en tu PATH — fue ejecutado via dlx/npx sin instalación permanente.");
+    info(`Instala globalmente para usar ${c.bold("ozali doctor")}, ${c.bold("ozali sync")}, etc.:`);
+    console.log(`    ${c.bold(`pnpm add -g ozali@${v}`)}   ${c.dim("← recomendado")}`);
+    console.log(`    ${c.dim("o")}  ${c.bold(`npm install -g ozali@${v}`)}`);
+    console.log("");
+  }
   console.log(`  1. Abre tu agente en este proyecto.`);
   console.log(`  2. Escribe ${c.bold('"diagnostica el proyecto"')} o ${c.bold('"ozali"')} para arrancar el bootstrap (calibración + generación de la skill ${c.bold("cdk")}).`);
   console.log(`  3. Tras trabajar, corre ${c.bold("ozali sync")} para llevar el histórico al repo de conocimiento.`);
   console.log(`  ${c.dim("Salud en cualquier momento:")} ${c.bold("ozali doctor")}`);
   return 0;
+}
+
+/**
+ * Instala Engram con la mejor ruta disponible para el SO actual.
+ * macOS/Linux: Homebrew (recomendado) o Go install como fallback.
+ * Windows: Go install (recomendado) o binario manual.
+ * Devuelve true si el binario quedó disponible en PATH.
+ */
+function installEngram() {
+  const plat = process.platform;
+
+  if (plat === "darwin" || plat === "linux") {
+    if (which("brew")) {
+      info("Instalando: " + c.bold("brew install gentleman-programming/tap/engram"));
+      spawnCmd("brew", ["install", "gentleman-programming/tap/engram"]);
+    } else if (which("go")) {
+      info("Homebrew no encontrado — instalando con Go:");
+      info("  " + c.bold("go install github.com/Gentleman-Programming/engram/cmd/engram@latest"));
+      spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
+    } else {
+      warn("No se encontró Homebrew ni Go. Opciones de instalación:");
+      info("  a) Homebrew " + c.dim("(recomendado)") + ": " + c.cyan("https://brew.sh") + " → " + c.bold("brew install gentleman-programming/tap/engram"));
+      info("  b) Binario precompilado: " + c.cyan("https://github.com/Gentleman-Programming/engram/releases"));
+      return false;
+    }
+  } else if (plat === "win32") {
+    if (which("go")) {
+      info("Instalando: " + c.bold("go install github.com/Gentleman-Programming/engram/cmd/engram@latest"));
+      spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
+    } else {
+      warn("Go no encontrado. Opciones de instalación en Windows:");
+      info("  a) Go 1.24+ " + c.dim("(recomendado)") + ": " + c.cyan("https://go.dev/dl/") + " → " + c.bold("go install github.com/Gentleman-Programming/engram/cmd/engram@latest"));
+      info("  b) Binario .zip: " + c.cyan("https://github.com/Gentleman-Programming/engram/releases"));
+      return false;
+    }
+  } else {
+    info("Guía de instalación completa: " + c.cyan("https://github.com/Gentleman-Programming/engram/blob/main/docs/INSTALLATION.md"));
+    return false;
+  }
+
+  const bin = which("engram");
+  if (bin) { ok("Engram instalado (" + bin + ")."); return true; }
+  warn("El binario engram no aparece en PATH tras la instalación.");
+  info("Puede que necesites reiniciar la terminal o ajustar tu PATH.");
+  return false;
+}
+
+/**
+ * Engram Cloud opt-in: réplica de equipo en tiempo real, adicional al git-sync.
+ * Configura el servidor y enrola el proyecto. Devuelve { enabled, server }.
+ */
+async function maybeEnableEngramCloud(project, opts) {
+  if (opts.yes) return { enabled: false };
+  const enable = await confirm("¿Habilitar Engram Cloud para el equipo? (réplica opt-in, requiere un servidor)", false);
+  if (!enable) {
+    info("Cloud omitido. El histórico de equipo viaja por git-sync (" + c.bold("ozali sync") + ").");
+    return { enabled: false };
+  }
+  const server = await ask("URL del servidor de Engram Cloud", "http://127.0.0.1:18080");
+  info(`Configurando Engram Cloud → ${server}`);
+  spawnCmd("engram", ["cloud", "config", "--server", server]);
+  info(`Enrolando el proyecto "${project}"…`);
+  if (spawnCmd("engram", ["cloud", "enroll", project]) === 0) {
+    ok("Engram Cloud habilitado. Replica con " + c.bold("ozali sync --cloud") + ".");
+    return { enabled: true, server };
+  }
+  warn("No se pudo enrolar el proyecto en Engram Cloud. Continúo solo con git-sync.");
+  return { enabled: false, server };
+}
+
+function printEngramManualInstructions(agent) {
+  const plat = process.platform;
+  info("Para activar memoria buscable/acumulativa (modo " + c.bold("hybrid") + "):");
+  if (plat === "darwin" || plat === "linux") {
+    info("  1. " + c.bold("brew install gentleman-programming/tap/engram") + "  " + c.dim("(o binario: github.com/Gentleman-Programming/engram/releases)"));
+  } else if (plat === "win32") {
+    info("  1. " + c.bold("go install github.com/Gentleman-Programming/engram/cmd/engram@latest") + "  " + c.dim("(requiere Go 1.24+)"));
+    info("     " + c.dim("o binario .zip: github.com/Gentleman-Programming/engram/releases"));
+  } else {
+    info("  1. " + c.cyan("https://github.com/Gentleman-Programming/engram/blob/main/docs/INSTALLATION.md"));
+  }
+  if (agent === "claude-code" || agent === "both") info("  2. " + c.bold("engram setup claude-code"));
+  if (agent === "opencode" || agent === "both") info("  2. " + c.bold("engram setup opencode"));
+  info("  3. Corre " + c.bold("ozali doctor") + " — el modo subirá a hybrid automáticamente.");
+}
+
+// Perfil base de permisos para Claude Code: lectura/comandos comunes libres,
+// destructivos denegados. Es un TEMPLATE — el usuario puede añadir más entradas y
+// re-correr init no las pisa (hace unión de listas).
+const CLAUDE_PERMS = {
+  allow: [
+    "WebFetch", "WebSearch",
+    "Bash(python *)", "Bash(python3 *)",
+    "Bash(node *)", "Bash(npm *)", "Bash(npx *)", "Bash(pnpm *)", "Bash(yarn *)",
+    "Bash(go *)", "Bash(mvn *)", "Bash(java *)",
+    "Bash(git status)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)", "Bash(git commit *)",
+    "Bash(ozali *)", "Bash(engram *)",
+    "PowerShell(python *)", "PowerShell(node *)", "PowerShell(npm *)", "PowerShell(npx *)",
+    "PowerShell(mvn *)", "PowerShell(java *)",
+  ],
+  deny: [
+    "Bash(rm -rf *)", "Bash(git push *)",
+    "PowerShell(Remove-Item *)",
+  ],
+};
+
+function mergeUnique(existing, additions) {
+  const out = Array.isArray(existing) ? [...existing] : [];
+  const seen = new Set(out);
+  let added = 0;
+  for (const item of additions) if (!seen.has(item)) { out.push(item); seen.add(item); added++; }
+  return { out, added };
+}
+
+function ensureClaudeCodeProfile(cwd, scope) {
+  const settingsPath = scope === "global"
+    ? path.join(HOME, ".claude", "settings.json")
+    : path.join(cwd, ".claude", "settings.json");
+  const cfg = readJSON(settingsPath, {});
+  cfg.permissions = cfg.permissions || {};
+  const allowMerge = mergeUnique(cfg.permissions.allow, CLAUDE_PERMS.allow);
+  const denyMerge = mergeUnique(cfg.permissions.deny, CLAUDE_PERMS.deny);
+  cfg.permissions.allow = allowMerge.out;
+  cfg.permissions.deny = denyMerge.out;
+  writeJSON(settingsPath, cfg);
+  const rel = path.relative(cwd, settingsPath) || settingsPath;
+  if (allowMerge.added + denyMerge.added > 0) {
+    ok(`Perfil base de permisos de Claude Code en ${c.bold(rel)} (${allowMerge.added} allow / ${denyMerge.added} deny añadidos; tus reglas se conservan).`);
+  } else {
+    info(`Permisos de Claude Code ya cubiertos en ${c.bold(rel)} (sin cambios).`);
+  }
 }
 
 function ensureOpencodeProfile(cwd) {
@@ -135,6 +311,9 @@ export function doctor(cwd) {
   add("Fuente de verdad", env.sot.found, env.sot.found ? `${env.sot.doc} + ${env.sot.dir}/` : "ausente (corre la skill 'ozali')");
   add("Skill ozali instalada", env.skill.installed, env.skill.installed ? env.skill.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   add("Engram", env.engram.available, env.engram.available ? env.engram.bin : "no instalado → modo docs");
+  const cloudOn = !!(cfg && cfg.cloud && cfg.cloud.enabled);
+  // Cloud es opt-in: "off" es un estado válido (no cuenta como fallo).
+  add("Engram Cloud", true, cloudOn ? `enrolado → ${cfg.cloud.server || "server por defecto"}` : "off (opt-in, git-sync activo)");
   add("Repo de conocimiento", !!(cfg && cfg.knowledgeRepo && exists(cfg.knowledgeRepo)), cfg ? cfg.knowledgeRepo : "sin configurar (ozali init)");
 
   // Strict TDD (de la fuente de verdad)
@@ -154,6 +333,23 @@ export function doctor(cwd) {
   console.log("");
   if (bad === 0) ok("Todo en orden. ozali está listo para trabajar.");
   else warn(`${bad} punto(s) a atender. Revisa los ✖ de arriba.`);
+
+  // Auto-upgrade: si Engram acaba de instalarse y el config aún dice "docs", subir a hybrid.
+  if (cfg && cfg.memoryMode === "docs" && env.engram.available) {
+    cfg.memoryMode = "hybrid";
+    writeJSON(CONFIG_PATH(cwd), cfg);
+    ok("Engram detectado → modo de memoria actualizado a " + c.bold("hybrid") + " en .ozali/config.json.");
+  }
+
+  // Estado de sync de Engram (informativo).
+  if (env.engram.available) {
+    const status = tryExec("engram", ["sync", "--status"], { cwd });
+    if (status) {
+      step("Estado de sync (Engram)");
+      for (const line of status.split(/\r?\n/)) console.log("  " + c.dim(line));
+    }
+  }
+
   return bad === 0 ? 0 : 1;
 }
 
@@ -192,13 +388,45 @@ export function sync(cwd, opts) {
   const docsLocal = path.join(cwd, ".ozali", "docs");
   const engramLocal = path.join(cwd, ".engram");
 
+  // Engram Cloud (opt-in): réplica bidireccional adicional al git-sync.
+  if (opts.cloud) {
+    if (cfg.cloud && cfg.cloud.enabled && tryExec("engram", ["--version"])) {
+      info(`Replicando con Engram Cloud (proyecto "${project}")…`);
+      if (spawnCmd("engram", ["sync", "--cloud", "--project", project], { cwd }) === 0) ok("Réplica con Engram Cloud completada.");
+      else warn("engram sync --cloud no terminó correctamente. Revisa el output de arriba.");
+    } else if (!(cfg.cloud && cfg.cloud.enabled)) {
+      warn("--cloud pedido, pero Engram Cloud no está habilitado. Corre " + c.bold("ozali init") + " para habilitarlo, o usa git-sync sin --cloud.");
+    } else {
+      warn("--cloud pedido, pero Engram no responde. Omito la réplica cloud.");
+    }
+  }
+
   if (opts.import) {
     // Repo de conocimiento → local
+    // 0) Traer lo más reciente del equipo (si el knowledge repo tiene remoto).
+    if (exists(path.join(kRepo, ".git")) && tryExec("git", ["remote", "get-url", "origin"], { cwd: kRepo })) {
+      info("Actualizando el repo de conocimiento (git pull)…");
+      if (spawnCmd("git", ["pull", "--ff-only"], { cwd: kRepo }) !== 0) {
+        warn("git pull no pudo completarse; importo lo que haya localmente.");
+      }
+    }
+    // 1) Docs
     const srcDocs = path.join(projDir, "docs");
     if (exists(srcDocs)) { copyDir(srcDocs, docsLocal); ok("Docs importados a .ozali/docs/."); }
+    else info("Aún no hay docs en el repo de conocimiento para este proyecto.");
+    // 2) Engram: copiar los chunks del repo de conocimiento → .engram/ ANTES de importar
+    //    (engram sync --import lee de .engram/ en el cwd; sin esta copia, un dev nuevo
+    //     no importaría nada).
     if (cfg.memoryMode === "hybrid" && tryExec("engram", ["--version"])) {
-      info("Ejecutando engram sync --import…");
-      tryExec("engram", ["sync", "--import"], { cwd });
+      const srcEngram = path.join(kRepo, "engram", project);
+      if (exists(srcEngram)) {
+        copyDir(srcEngram, engramLocal);
+        info("Chunks de Engram copiados a .engram/. Importando…");
+        if (spawnCmd("engram", ["sync", "--import"], { cwd }) === 0) ok("Memorias importadas a Engram local.");
+        else warn("engram sync --import no terminó correctamente. Revisa el output de arriba.");
+      } else {
+        info("Aún no hay export de Engram en el repo de conocimiento para este proyecto.");
+      }
     }
     info("Import completo. Revisa .ozali/docs/.");
     return 0;
@@ -208,8 +436,12 @@ export function sync(cwd, opts) {
   // 1) Engram export (si hybrid + disponible)
   if (cfg.memoryMode === "hybrid" && tryExec("engram", ["--version"])) {
     info("Exportando memorias con engram sync…");
-    tryExec("engram", ["sync"], { cwd });
-    if (exists(engramLocal)) { copyDir(engramLocal, path.join(kRepo, "engram", project)); ok("Export de Engram copiado al repo de conocimiento."); }
+    if (spawnCmd("engram", ["sync"], { cwd }) === 0) {
+      if (exists(engramLocal)) { copyDir(engramLocal, path.join(kRepo, "engram", project)); ok("Export de Engram copiado al repo de conocimiento."); }
+      else info("engram sync no generó .engram/ (sin memorias nuevas).");
+    } else {
+      warn("engram sync falló; sincronizo solo docs. Revisa el output de arriba.");
+    }
   } else if (cfg.memoryMode === "hybrid") {
     warn("Modo hybrid pero Engram no responde; sincronizo solo docs.");
   }

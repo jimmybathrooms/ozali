@@ -79,6 +79,24 @@ export function tryExec(cmd, args = [], opts = {}) {
   }
 }
 
+/** Ejecuta un comando con I/O visible en la terminal. Devuelve el exit code (0 = éxito). */
+export function spawnCmd(cmd, args = [], opts = {}) {
+  try {
+    execFileSync(cmd, args, { stdio: "inherit", ...opts });
+    return 0;
+  } catch (e) {
+    return e.status ?? 1;
+  }
+}
+
+/** Detecta el gestor de paquetes disponible (pnpm > bun > yarn > npm). */
+export function detectPkgManager() {
+  for (const pm of ["pnpm", "bun", "yarn", "npm"]) {
+    if (which(pm)) return pm;
+  }
+  return "npm";
+}
+
 export function which(bin) {
   const finder = process.platform === "win32" ? "where" : "which";
   return tryExec(finder, [bin]);
