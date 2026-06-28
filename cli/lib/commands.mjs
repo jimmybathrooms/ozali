@@ -49,15 +49,16 @@ export async function init(cwd, opts) {
 
   // Engram
   let memoryMode = "docs";
-  if (env.engram.available) {
+  if (opts.noEngram) {
+    info("--no-engram: arranco en modo " + c.bold("docs") + " (sin usar Engram).");
+  } else if (env.engram.available) {
     memoryMode = "hybrid";
     ok(`Engram disponible (${env.engram.bin}). Modo de memoria: ${c.bold("hybrid")} (docs + Engram).`);
   } else {
     warn("Engram no está instalado.");
-    // Decisión de instalar: --no-engram/--dry-run nunca instalan; --yes usa el default (sí);
-    // interactivo pregunta.
-    if (opts.dryRun && !opts.noEngram) info("(dry-run) Aquí instalaría y configuraría Engram.");
-    const installNow = (opts.noEngram || opts.dryRun) ? false
+    // --dry-run no instala; --yes usa el default (sí); interactivo pregunta.
+    if (opts.dryRun) info("(dry-run) Aquí instalaría y configuraría Engram.");
+    const installNow = opts.dryRun ? false
       : (opts.yes ? true : await confirm("¿Instalo y configuro Engram ahora?", true));
     if (installNow) {
       if (opts.yes) info("Modo no interactivo: instalando Engram automáticamente…");
@@ -103,6 +104,8 @@ export async function init(cwd, opts) {
   // 2) perfiles base de permisos (idempotentes, merge mínimo) por agente
   if (agent === "claude-code" || agent === "both") {
     ensureClaudeCodeProfile(cwd, scope);
+    // Claude Code ignora los permisos de un .claude/settings.json de proyecto hasta confiar en él.
+    if (scope === "project" && !opts.noTrust) await ensureClaudeWorkspaceTrust(cwd, opts);
   }
   if (agent === "opencode" || agent === "both") {
     ensureOpencodeProfile(cwd);
@@ -281,6 +284,34 @@ function ensureClaudeCodeProfile(cwd, scope) {
   } else {
     info(`Permisos de Claude Code ya cubiertos en ${c.bold(rel)} (sin cambios).`);
   }
+}
+
+// Marca el proyecto como confiable en Claude Code (~/.claude.json). Sin esto, Claude Code
+// ignora los permisos de un .claude/settings.json de proyecto ("workspace not trusted").
+async function ensureClaudeWorkspaceTrust(cwd, opts) {
+  const p = path.join(HOME, ".claude.json");
+  if (!exists(p)) {
+    info("Claude Code aún no tiene ~/.claude.json; al abrirlo aquí, acepta el diálogo de confianza.");
+    return;
+  }
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(p, "utf8")); }
+  catch { warn("No pude leer ~/.claude.json; acepta el diálogo de confianza de Claude Code manualmente."); return; }
+  cfg.projects = cfg.projects || {};
+  cfg.projects[cwd] = cfg.projects[cwd] || {};
+  if (cfg.projects[cwd].hasTrustDialogAccepted === true) {
+    info("Claude Code ya confía en este workspace.");
+    return;
+  }
+  const doTrust = opts.yes ? true
+    : await confirm("¿Marcar este proyecto como confiable en Claude Code? (necesario para que apliquen los permisos)", true);
+  if (!doTrust) {
+    info("Workspace no marcado como confiable: Claude Code ignorará los permisos hasta que aceptes su diálogo.");
+    return;
+  }
+  cfg.projects[cwd].hasTrustDialogAccepted = true;
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2)); // formato que usa Claude Code (indent 2, sin newline final)
+  ok("Workspace marcado como confiable en Claude Code (los permisos de .claude/settings.json ya aplican).");
 }
 
 function ensureOpencodeProfile(cwd) {

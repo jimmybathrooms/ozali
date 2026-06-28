@@ -65,7 +65,9 @@ ozali sync      # lleva el histórico (docs + Engram) al repo de conocimiento de
 
 `init` también escribe un **perfil base de permisos** (`.claude/settings.json` para Claude Code,
 `opencode.json` para opencode) para reducir confirmaciones: deja libres comandos seguros y bloquea
-los destructivos. Es un template — tus reglas se conservan al re-correr `init`.
+los destructivos. Es un template — tus reglas se conservan al re-correr `init`. Como Claude Code
+**ignora** los permisos de un proyecto hasta confiar en él, `init` ofrece marcar el workspace como
+confiable (`hasTrustDialogAccepted` en `~/.claude.json`); usa `--no-trust` para omitirlo.
 
 `init` también **instala Engram** y registra su MCP con `engram setup <agente>`: en modo
 interactivo te pregunta (default sí), y con `--yes` lo instala automáticamente. Usa brew en
@@ -73,9 +75,9 @@ macOS/Linux, `go install` en Windows, con binario precompilado como fallback. Si
 instalarlo, pasa `--no-engram` (arranca en modo `docs`). Opcionalmente habilita **Engram Cloud**
 (réplica de equipo opt-in) además del git-sync.
 
-Flags útiles: `--yes` (no interactivo), `--dry-run` (init sin escribir), `--no-engram`, `--agent`,
-`--scope`, `--knowledge-repo`, `--import`/`--push`/`--cloud` (sync). Modelo mental completo en
-[docs/intended-usage.md](docs/intended-usage.md).
+Flags útiles: `--yes` (no interactivo), `--dry-run` (init sin escribir), `--no-engram`, `--no-trust`,
+`--agent`, `--scope`, `--knowledge-repo`, `--import`/`--push`/`--cloud` (sync). Modelo mental completo
+en [docs/intended-usage.md](docs/intended-usage.md).
 
 ## Agentes soportados
 

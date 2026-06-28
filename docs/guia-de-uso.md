@@ -101,6 +101,11 @@ Es **un punto de partida, no una jaula**: puedes editar ese archivo y añadir lo
 necesite. Si vuelves a correr `ozali init`, tus reglas **se conservan** (no se borran ni se
 duplican).
 
+> **Confianza del workspace (Claude Code):** por seguridad, Claude Code **ignora** los permisos de
+> un proyecto hasta que confías en él (verás un aviso *"this workspace has not been trusted"*).
+> `init` te ofrece marcarlo como confiable automáticamente; si prefieres hacerlo tú, abre Claude
+> Code en la carpeta y acepta el diálogo de confianza una vez. Con `--no-trust` ozali no lo toca.
+
 Ejemplo — permitir Docker además de lo de fábrica:
 
 ```json
@@ -150,6 +155,11 @@ Lo corriste con `dlx`/`npx`, que es temporal. Instálalo global: `pnpm add -g oz
 
 **¿Esto ensucia mi repositorio?**
 No. El histórico y la memoria se aíslan (`.ozali/`, `.engram/` van al `.gitignore`).
+
+**Veo "this workspace has not been trusted" y mis permisos no aplican.**
+Es el aviso de seguridad de Claude Code: ignora los permisos del proyecto hasta confiar en él.
+Deja que `init` lo marque como confiable, o abre Claude Code en la carpeta y acepta el diálogo una
+vez. Tras eso, el aviso desaparece y los permisos surten efecto.
 
 **¿Funciona en Windows?**
 Sí. Los permisos base incluyen variantes PowerShell, y Engram se instala con `go install` o un

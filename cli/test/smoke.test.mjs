@@ -57,7 +57,7 @@ test("doctor en proyecto vacío reporta pendientes (exit 1)", () => {
 test("init --yes instala la skill, aísla el histórico y escribe config", () => {
   const dir = tmpProject();
   try {
-    run(["init", "--yes", "--no-engram", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    run(["init", "--yes", "--no-engram", "--no-trust", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
     assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "ozali", "SKILL.md")), "SKILL.md instalada");
     assert.ok(fs.existsSync(path.join(dir, ".ozali", "config.json")), "config escrita");
     const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".ozali", "config.json"), "utf8"));
