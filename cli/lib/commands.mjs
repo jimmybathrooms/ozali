@@ -528,18 +528,70 @@ function readStrictTdd(cwd, sot) {
 }
 
 // =========================================================== update ==========
-export function update(cwd) {
-  step("ozali update — actualizar skill instalada");
+// Lleva una instalación existente al paquete actual: refresca la skill ozali (con sus
+// references), los perfiles de permisos y **crea/refresca ozali-jarvis** (clave para repos
+// inicializados antes de 0.4.0). La skill `cdk` la regenera el AGENTE (no el CLI): se detecta
+// y se guía la regeneración.
+export function update(cwd, opts = {}) {
+  step("ozali update — actualizar la instalación al paquete actual");
   const env = detectAll(cwd);
-  if (!env.skill.installed) { warn("No hay skill ozali instalada. Corre " + c.bold("ozali init") + " primero."); return 1; }
-  for (const p of env.skill.paths) {
-    copyDir(SKILL_SRC, p);
-    ok(`Actualizada: ${path.relative(cwd, p) || p} → v${pkgVersion()}`);
-  }
   const cfgPath = CONFIG_PATH(cwd);
   const cfg = readJSON(cfgPath);
+  if (!env.skill.installed && !cfg) {
+    warn("No hay instalación de ozali en esta ruta. Corre " + c.bold("ozali init") + " primero.");
+    return 1;
+  }
+
+  // 1) Skill ozali (incluye las references: la base desde la que el agente regenera cdk)
+  if (env.skill.installed) {
+    for (const p of env.skill.paths) {
+      copyDir(SKILL_SRC, p);
+      ok(`Skill ozali actualizada: ${path.relative(cwd, p) || p} → v${pkgVersion()}`);
+    }
+  } else {
+    warn("Skill ozali no instalada en esta ruta (corre " + c.bold("ozali init") + " para instalarla).");
+  }
+
+  // Agente/scope: del config; si falta, infiere del entorno.
+  const agent = (cfg && cfg.agent) || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
+    : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
+  const scope = (cfg && cfg.scope) || "project";
+
+  // 2) Perfiles base de permisos (idempotente: recoge defaults nuevos del paquete)
+  if (agent === "claude-code" || agent === "both") ensureClaudeCodeProfile(cwd, scope);
+  if (agent === "opencode" || agent === "both") ensureOpencodeProfile(cwd);
+
+  // 3) ozali-jarvis: crea el orquestador en repos previos a 0.4.0 y refresca el resto.
+  if (!opts.noJarvis) {
+    const proj = projectName(cwd);
+    const engPath = path.join(cwd, ".engram", "config.json");
+    if (!exists(engPath)) { writeJSON(engPath, { project_name: proj }); ok(`Proyecto de memoria fijado en ${c.bold(".engram/config.json")} (${proj}).`); }
+    if (agent === "claude-code" || agent === "both") ensureJarvisClaudeCode(cwd);
+    if (agent === "opencode" || agent === "both") ensureJarvisOpencode(cwd);
+  }
+
+  // 4) Skill cdk: la genera el AGENTE (Fase 6), el CLI no la regenera.
+  const cdk = detectCdk(cwd);
+  if (cdk.installed) {
+    step("Skill cdk (generada por el agente)");
+    warn("cdk no se actualiza desde el CLI: la regenera tu agente con el contrato nuevo.");
+    info("Abre tu agente y vuelve a correr la skill " + c.bold("ozali") + " para regenerar cdk (ozali-jarvis, recall-first §7, telemetría).");
+    info("Tus docs por hito (" + c.bold(".ozali/docs/cdk/") + ") y el plan congelado se conservan.");
+  }
+
+  // 5) versión del config
   if (cfg) { cfg.version = pkgVersion(); cfg.updatedAt = new Date().toISOString(); writeJSON(cfgPath, cfg); }
+  ok(`Instalación al día con ozali v${pkgVersion()}.`);
   return 0;
+}
+
+/** ¿Existe la skill cdk (generada por el agente)? */
+function detectCdk(cwd) {
+  const paths = [
+    path.join(cwd, ".claude", "skills", "cdk", "SKILL.md"),
+    path.join(HOME, ".claude", "skills", "cdk", "SKILL.md"),
+  ].filter(exists);
+  return { installed: paths.length > 0, paths };
 }
 
 // ============================================================= sync ===========

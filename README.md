@@ -2,6 +2,8 @@
 
 # ozali
 
+[![npm version](https://img.shields.io/npm/v/ozali.svg)](https://www.npmjs.com/package/ozali)
+
 **Bootstrap de IA por equipo — calibra tus proyectos, genera una skill de ejecución con TDD/SDD, y mantiene memoria de equipo (Engram) con histórico aislado.**
 
 </div>
@@ -59,7 +61,7 @@ git clone <repo> && node ozali/cli/bin/ozali.mjs init
 ```bash
 ozali init      # detecta agente, instala la skill, aísla el histórico, instala+configura Engram
 ozali doctor    # health-check read-only (fuente de verdad, Engram, Cloud, Strict TDD, runner…)
-ozali update    # actualiza la skill instalada a la versión del paquete
+ozali update    # actualiza la instalación (skill ozali + ozali-jarvis + permisos) al paquete
 ozali sync      # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
 ozali audit     # navega/audita la memoria de Engram del proyecto (o general)
 ```
@@ -68,6 +70,18 @@ ozali audit     # navega/audita la memoria de Engram del proyecto (o general)
 **ese proyecto** o **general** (todos los proyectos); fuera de un repo va directo a general. Usa
 `--tui` para el navegador interactivo, `--search "<texto>"` para buscar y `--general` para forzar el
 alcance. Sin Engram, audita el histórico local de `.ozali/docs/`.
+
+### Actualizar a una versión nueva
+
+```bash
+pnpm add -g ozali@<versión>   # actualiza el CLI global (pinea la versión por el cooldown de pnpm)
+ozali update                  # en cada repo: refresca skill ozali + ozali-jarvis + permisos
+```
+
+`ozali update` también **crea ozali-jarvis** en repos inicializados con versiones anteriores. La skill
+`cdk` la **regenera tu agente** (no el CLI): tras `ozali update`, abre el agente y vuelve a correr la
+skill `ozali` para regenerar `cdk` con el contrato nuevo — tus docs por hito y el plan congelado se
+conservan.
 
 `init` también escribe un **perfil base de permisos** (`.claude/settings.json` para Claude Code,
 `opencode.json` para opencode) para reducir confirmaciones: deja libres comandos seguros y bloquea

@@ -118,6 +118,20 @@ test("init opencode crea jarvis (AGENTS.md + agente + plugin)", () => {
   }
 });
 
+test("update agrega ozali-jarvis en un repo que no lo tenía", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "agents", "ozali-jarvis.md")), "precondición: sin jarvis");
+    run(["update"], dir);
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "agents", "ozali-jarvis.md")), "update crea subagente jarvis");
+    assert.match(fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8"), /ozali-jarvis:start/, "update crea bloque jarvis");
+    assert.ok(fs.existsSync(path.join(dir, ".engram", "config.json")), "update fija .engram/config.json");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("init --dry-run no escribe nada", () => {
   const dir = tmpProject();
   try {

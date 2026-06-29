@@ -82,7 +82,7 @@ Lleva el histórico y la memoria al repo de conocimiento del equipo. Tus compañ
 |---|---|
 | `ozali init` | Prepara el proyecto (lo corres una vez por repo). |
 | `ozali doctor` | Revisa que todo esté bien. Es solo lectura, no cambia nada. |
-| `ozali update` | Actualiza la skill a la última versión. |
+| `ozali update` | Actualiza skill ozali + ozali-jarvis + permisos (y guía cómo regenerar cdk). |
 | `ozali sync` | Sube el histórico/memoria al repo de equipo. |
 | `ozali sync --import` | Baja lo que el equipo ya guardó. |
 | `ozali audit` | Navega/audita la memoria de Engram (qué se ha hecho). |
@@ -189,6 +189,11 @@ No. El histórico y la memoria se aíslan (`.ozali/`, `.engram/` van al `.gitign
 Es el aviso de seguridad de Claude Code: ignora los permisos del proyecto hasta confiar en él.
 Deja que `init` lo marque como confiable, o abre Claude Code en la carpeta y acepta el diálogo una
 vez. Tras eso, el aviso desaparece y los permisos surten efecto.
+
+**Actualicé ozali pero no veo ozali-jarvis (o cdk quedó viejo).**
+Corre `ozali update` en el repo: refresca la skill ozali, los permisos y **crea/actualiza
+ozali-jarvis**. La skill `cdk` la regenera tu agente: tras `ozali update`, abre el agente y vuelve a
+correr la skill `ozali` para regenerar `cdk` con lo nuevo (tus docs por hito y el plan se conservan).
 
 **¿Funciona en Windows?**
 Sí. Los permisos base incluyen variantes PowerShell, y Engram se instala con `go install` o un

@@ -15,7 +15,7 @@ ${c.bold("Comandos:")}
   init      Detecta el agente (Claude Code/opencode), instala la skill ozali,
             aísla el histórico, configura Engram y el repo de conocimiento.
   doctor    Health-check read-only del proyecto (fuente de verdad, Engram, TDD…).
-  update    Actualiza la skill ozali instalada a la versión de este paquete.
+  update    Actualiza la instalación (skill ozali + ozali-jarvis + permisos) al paquete.
   sync      Sincroniza el histórico (docs + Engram) con el repo de conocimiento.
   audit     Navega/audita la memoria de Engram del proyecto (o general).
 
@@ -27,7 +27,7 @@ ${c.bold("Opciones comunes:")}
   --knowledge-repo <p> (init) Ruta del repo de conocimiento.
   --no-engram          (init) No usar Engram; arranca en modo docs.
   --no-trust           (init) No marcar el workspace como confiable en Claude Code.
-  --no-jarvis          (init) No crear el orquestador ozali-jarvis.
+  --no-jarvis          (init/update) No crear/refrescar el orquestador ozali-jarvis.
   --import             (sync) Importa del repo de conocimiento a local.
   --push               (sync) Hace push al remoto del repo de conocimiento.
   --cloud              (sync) Replica también a Engram Cloud (si está habilitado).
@@ -75,10 +75,12 @@ async function main() {
   if (!cmd || opts.help || cmd === "help") { console.log(HELP); return 0; }
 
   const cwd = process.cwd();
+  // Banner de versión: confirma qué versión de ozali está corriendo en cada comando.
+  console.log(`${c.bold("ozali")} ${c.dim("v" + pkgVersion())}`);
   switch (cmd) {
     case "init": return await init(cwd, opts);
     case "doctor": return doctor(cwd);
-    case "update": return update(cwd);
+    case "update": return update(cwd, opts);
     case "sync": return sync(cwd, opts);
     case "audit": return await audit(cwd, opts);
     default:
