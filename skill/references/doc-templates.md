@@ -291,6 +291,13 @@ usuario, en:
 | Total de tiempo de sesión   | <n / N/A> |
 | Costo estimado              | <$ / N/A> |
 
+## Ahorro por recall (Engram)
+| Métrica | Valor |
+| :-- | :-- |
+| ¿Se reusó memoria? (recall-first) | sí / no |
+| Artefactos reusados | <p. ej. cdk/<hito>/analisis @ <commit>> |
+| Relectura evitada (estimada) | <n tokens / N/A> |
+
 ## Notas
 - <observaciones sobre el consumo del hito; deja vacío o "N/A" si no puedes encontrar información del proveedor>
 ```
@@ -299,3 +306,23 @@ usuario, en:
 > derivar ni inventar cifras de otro sistema: solo registra el nombre del proveedor y deja
 > el resto en `N/A`. El objetivo es **mantener la estructura presente** para no perder la
 > trazabilidad del hito.
+
+### Espejo en Engram + agregado (telemetría)
+
+Al cerrar, además del doc, `cdk` **espeja** las métricas a Engram y mantiene un agregado por
+proyecto (ver [`engram-convention.md`](engram-convention.md) §7):
+
+- `cdk/{hito}/uso-tokens` — métricas del hito (mismo contenido que el doc).
+- `cdk/_project/token-metrics` — agregado de los últimos hitos (para ajustar el recall-first).
+- `.ozali/metrics/token-metrics.json` — copia **local** que lee `ozali doctor` para la tendencia:
+
+```json
+{
+  "hits": [
+    { "hito": "<slug>", "input": 0, "output": 0, "total": 0, "savedByRecall": 0, "at": "<ISO-8601>" }
+  ]
+}
+```
+
+> `savedByRecall` = estimación de tokens de relectura evitados por reusar memoria. Con proveedor sin
+> métricas, deja `0`/`N/A` pero mantén la estructura.

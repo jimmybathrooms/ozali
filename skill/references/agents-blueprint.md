@@ -55,13 +55,15 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
 ### 3. project-analyzer
 - **Misión:** entender el código existente y el impacto del cambio. *No se planea lo que
   no se ha entendido: primero el terreno, después el plano.*
-- **Responsabilidades:** **primero, SIEMPRE**, ejecuta el harness
-  `node .claude/skills/cdk/verify-structure.mjs --grep <palabra-clave>` — su salida es la
-  **base factual** del análisis (estructura real, clases clave, discrepancias doc↔código,
-  candidatos a **reutilización antes de crear**). Luego mapea dependencias, identifica
-  **hitos de importancia** y riesgos, superficies afectadas y contratos en riesgo. Marca
-  los riesgos **🔴 BLOQUEANTES** que detienen el flujo hasta resolverse. Es el autor del
-  **Documento 1 (análisis)**.
+- **Responsabilidades:** **recall antes de recomputar** — primero `mem_search` del `analisis`/
+  `resumen-tecnico` previo del área; si existe con `ultimo_commit` vigente, **reúsalo** (vía
+  `mem_get_observation` selectivo) en vez de releer archivos grandes; si el código cambió, analiza
+  **solo el delta** (convención §7). Ejecuta **siempre** el harness
+  `node .claude/skills/cdk/verify-structure.mjs --grep <palabra-clave>` (estructural, barato) como
+  **base factual** (estructura real, clases clave, discrepancias doc↔código, candidatos a
+  **reutilización antes de crear**). Luego mapea dependencias, identifica **hitos de importancia** y
+  riesgos, superficies afectadas y contratos en riesgo. Marca los riesgos **🔴 BLOQUEANTES** que
+  detienen el flujo hasta resolverse. Es el autor del **Documento 1 (análisis)**.
 - **Entrada:** tarea. **Salida:** informe de impacto + hitos (+ preguntas abiertas al usuario).
 - **Herramientas:** solo lectura (Read, Grep, Glob) + ejecución del harness (Bash/PowerShell
   acotado a `node verify-structure.mjs`).
@@ -70,7 +72,10 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
 - **Misión:** enrutar el trabajo entre subagentes e integrar resultados.
 - **Responsabilidades:** decide qué subagente actúa y en qué orden; gestiona iteraciones
   executioners ⇄ tester; consolida la salida final. **Alimenta al `project-documenter`** con
-  los eventos del ciclo (dudas, decisiones, desvíos) para la bitácora `05`.
+  los eventos del ciclo (dudas, decisiones, desvíos) para la bitácora `05`. **Hace cumplir el
+  recall-first** (convención §7): recuperación selectiva (no volcar toda la memoria), restauración
+  desde `state`+`bitacora` tras compactación, y consulta `cdk/_project/token-metrics` al iniciar para
+  ajustar la agresividad del recall.
 - **Modo `--auto`:** si el hito se invocó con `--auto`, recorre el hito de punta a punta
   **sin prompts** —incluida la **lectura de rutas no contempladas** durante el análisis y la
   ejecución post-GATE— con el **único alto en el 🛑 GATE del plan**. Si algo cae **fuera de
@@ -117,6 +122,8 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
   - `03-resumen-tecnico.md`, `04-resumen-usuario.md` y `06-uso-tokens.md` se escriben **al
     cierre**. El `06` solo rellena métricas si el proveedor es **Claude/Anthropic** (fuente
     `/cost`); con otro proveedor deja la estructura + nombre del proveedor y métricas `N/A`.
+    Además **espeja** `06` a Engram (`cdk/{hito}/uso-tokens`), actualiza el agregado
+    `cdk/_project/token-metrics` y escribe `.ozali/metrics/token-metrics.json` (lo lee `ozali doctor`).
 - **Herramientas:** escritura de documentación (Read, Write).
 
 ### 8. tester

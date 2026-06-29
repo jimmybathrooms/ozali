@@ -33,9 +33,20 @@ test("--version imprime la versión del package.json", () => {
   assert.equal(stdout.trim(), pkg.version);
 });
 
-test("--help menciona los 4 comandos", () => {
+test("--help menciona los comandos", () => {
   const { stdout } = run(["--help"]);
-  for (const cmd of ["init", "doctor", "update", "sync"]) assert.match(stdout, new RegExp(cmd));
+  for (const cmd of ["init", "doctor", "update", "sync", "audit"]) assert.match(stdout, new RegExp(cmd));
+});
+
+test("audit imprime cabecera y no rompe (general)", () => {
+  const dir = tmpProject();
+  try {
+    // Sin Engram → fallback a docs; con Engram → comandos read-only. Ambos exit 0.
+    const { stdout } = run(["audit", "--general", "--yes"], dir);
+    assert.match(stdout, /auditoría de memoria/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("comando desconocido sale con código 1", () => {
@@ -71,6 +82,37 @@ test("init --yes instala la skill, aísla el histórico y escribe config", () =>
     const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     assert.ok(Array.isArray(settings.permissions.allow) && settings.permissions.allow.length > 0, "allow no vacío");
     assert.ok(settings.permissions.deny.includes("Bash(rm -rf *)"), "deny bloquea rm -rf");
+    // ozali-jarvis (Claude Code)
+    assert.match(fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8"), /ozali-jarvis:start/, "bloque jarvis en CLAUDE.md");
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "agents", "ozali-jarvis.md")), "subagente jarvis");
+    assert.ok(settings.hooks && settings.hooks.SessionStart, "hooks de recordatorio jarvis");
+    const eng = JSON.parse(fs.readFileSync(path.join(dir, ".engram", "config.json"), "utf8"));
+    assert.ok(eng.project_name, ".engram/config.json con project_name");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init --no-jarvis no crea el orquestador", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    assert.ok(!fs.existsSync(path.join(dir, "CLAUDE.md")), "sin CLAUDE.md");
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "agents", "ozali-jarvis.md")), "sin subagente jarvis");
+    assert.ok(!fs.existsSync(path.join(dir, ".engram", "config.json")), "sin .engram/config.json");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init opencode crea jarvis (AGENTS.md + agente + plugin)", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--agent", "opencode", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    assert.match(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), /ozali-jarvis:start/, "bloque jarvis en AGENTS.md");
+    const oc = JSON.parse(fs.readFileSync(path.join(dir, "opencode.json"), "utf8"));
+    assert.equal(oc.agent["ozali-jarvis"].mode, "primary", "agente jarvis primary en opencode.json");
+    assert.ok(fs.existsSync(path.join(dir, ".opencode", "plugins", "ozali-jarvis.js")), "plugin jarvis opencode");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

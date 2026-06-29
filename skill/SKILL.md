@@ -308,12 +308,25 @@ recuperable, acumulativo). Así la herramienta **aprende de lo que el equipo va 
 completo (naming, llamadas inline, degradación) en
 [`references/engram-convention.md`](references/engram-convention.md).
 
+> **Orquestador por defecto (`ozali-jarvis`):** `ozali init` crea el agente **ozali-jarvis**
+> (persona en CLAUDE.md/AGENTS.md + subagente + hooks) que opera **memoria-aware en toda sesión, sin
+> necesidad de `/cdk`**: recupera contexto de Engram al iniciar, registra el trabajo del equipo
+> conforme avanza, y **delega la ejecución disciplinada en `cdk`**. `cdk` y jarvis comparten el mismo
+> contrato de memoria (esta convención).
+
 **Mínimos que `cdk` debe cablear** (resumen; el detalle y los `mem_*` exactos están en la convención):
 
-- **Al iniciar un hito** → `mem_save_prompt` (captura el prompt real una vez) + `mem_search` de
-  `cdk/{hito}/state`, `cdk/_project/testing-capabilities` y `cdk/{hito}/*` → `mem_get_observation`
-  de lo relevante. Si hay `state` con pendientes, **reanuda**; con `testing-capabilities` resuelve
-  el modo TDD.
+- **Al iniciar un hito** → handshake "Engram en línea" (`mem_current_project` + `mem_context`) +
+  `mem_save_prompt` (captura el prompt real una vez) + `mem_search` de `cdk/{hito}/state`,
+  `cdk/_project/testing-capabilities`, `cdk/_project/token-metrics` y `cdk/{hito}/*` →
+  `mem_get_observation` **selectivo** de lo relevante. Si hay `state` con pendientes, **reanuda**; con
+  `testing-capabilities` resuelve el modo TDD.
+- **Recall-first (ahorro de tokens/contexto)** → antes de releer/re-analizar, reusar el
+  `analisis`/`resumen-tecnico` previo si su `ultimo_commit` sigue vigente (guard de staleness); si el
+  código cambió, re-analizar solo el delta. Recuperación selectiva y restauración tras compactación
+  desde `state`+`bitacora`. Ver convención §7.
+- **Telemetría** → espejar `uso-tokens` a `cdk/{hito}/uso-tokens`, agregar en
+  `cdk/_project/token-metrics` y escribir `.ozali/metrics/token-metrics.json` (lo lee `ozali doctor`).
 - **Al aprobar el GATE** → `mem_save` de `cdk/{hito}/plan-aprobado` **una sola vez** (inmutable).
 - **Durante el ciclo** → `mem_update` (upsert) de `cdk/{hito}/bitacora` y `cdk/{hito}/state` tras
   cada transición de fase (el archivo `05` sigue siendo append-only como fuente de verdad).

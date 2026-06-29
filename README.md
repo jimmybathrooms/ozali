@@ -61,7 +61,13 @@ ozali init      # detecta agente, instala la skill, aísla el histórico, instal
 ozali doctor    # health-check read-only (fuente de verdad, Engram, Cloud, Strict TDD, runner…)
 ozali update    # actualiza la skill instalada a la versión del paquete
 ozali sync      # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
+ozali audit     # navega/audita la memoria de Engram del proyecto (o general)
 ```
+
+`ozali audit` recorre lo que el equipo ha acumulado en Engram: dentro de un repo propone auditar
+**ese proyecto** o **general** (todos los proyectos); fuera de un repo va directo a general. Usa
+`--tui` para el navegador interactivo, `--search "<texto>"` para buscar y `--general` para forzar el
+alcance. Sin Engram, audita el histórico local de `.ozali/docs/`.
 
 `init` también escribe un **perfil base de permisos** (`.claude/settings.json` para Claude Code,
 `opencode.json` para opencode) para reducir confirmaciones: deja libres comandos seguros y bloquea
@@ -75,9 +81,16 @@ macOS/Linux, `go install` en Windows, con binario precompilado como fallback. Si
 instalarlo, pasa `--no-engram` (arranca en modo `docs`). Opcionalmente habilita **Engram Cloud**
 (réplica de equipo opt-in) además del git-sync.
 
+`init` también crea **ozali-jarvis**, un **orquestador always-on**: persona en `CLAUDE.md`/`AGENTS.md`
++ subagente + hooks de recordatorio que hace que el agente, **en toda sesión y sin necesidad de
+`/cdk`**, recupere contexto de Engram, registre el trabajo del equipo (memoria en contexto) y delegue
+la ejecución disciplinada en `cdk`. Fija el proyecto en `.engram/config.json` para memoria
+determinista. Con Engram en línea, jarvis y `cdk` operan **recall-first** (reusan memoria en vez de
+releer) para gastar menos tokens/contexto. Omítelo con `--no-jarvis`.
+
 Flags útiles: `--yes` (no interactivo), `--dry-run` (init sin escribir), `--no-engram`, `--no-trust`,
-`--agent`, `--scope`, `--knowledge-repo`, `--import`/`--push`/`--cloud` (sync). Modelo mental completo
-en [docs/intended-usage.md](docs/intended-usage.md).
+`--no-jarvis`, `--agent`, `--scope`, `--knowledge-repo`, `--import`/`--push`/`--cloud` (sync). Modelo
+mental completo en [docs/intended-usage.md](docs/intended-usage.md).
 
 ## Agentes soportados
 

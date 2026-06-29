@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   c, ok, warn, err, info, step,
-  SKILL_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
+  SKILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, tryExec, spawnCmd, which,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME,
 } from "./util.mjs";
@@ -109,6 +109,16 @@ export async function init(cwd, opts) {
   }
   if (agent === "opencode" || agent === "both") {
     ensureOpencodeProfile(cwd);
+  }
+
+  // 2.5) ozali-jarvis: orquestador always-on (memoria Engram + puente a cdk).
+  if (!opts.noJarvis) {
+    const proj = projectName(cwd);
+    // Fija el proyecto para escrituras deterministas de memoria (se deriva igual por cada miembro).
+    writeJSON(path.join(cwd, ".engram", "config.json"), { project_name: proj });
+    ok(`Proyecto de memoria fijado en ${c.bold(".engram/config.json")} (${proj}).`);
+    if (agent === "claude-code" || agent === "both") ensureJarvisClaudeCode(cwd);
+    if (agent === "opencode" || agent === "both") ensureJarvisOpencode(cwd);
   }
 
   // 3) gitignore del histórico aislado
@@ -286,6 +296,102 @@ function ensureClaudeCodeProfile(cwd, scope) {
   }
 }
 
+// ----------------------------------------------------------------- ozali-jarvis
+const JARVIS_BEGIN = "<!-- ozali-jarvis:start -->";
+const JARVIS_END = "<!-- ozali-jarvis:end -->";
+
+/** Cuerpo del bloque jarvis para CLAUDE.md / AGENTS.md (sin el frontmatter del template). */
+function jarvisPersonaBody() {
+  const tpl = fs.readFileSync(path.join(TEMPLATES_SRC, "ozali-jarvis.md"), "utf8");
+  // Quita el frontmatter YAML (--- ... ---) y deja el cuerpo markdown.
+  return tpl.replace(/^---[\s\S]*?---\s*/, "").trim();
+}
+
+/** Inserta/actualiza un bloque marcado en un archivo markdown (idempotente). */
+function upsertMarkedBlock(file, body) {
+  const block = `${JARVIS_BEGIN}\n${body}\n${JARVIS_END}`;
+  let txt = exists(file) ? fs.readFileSync(file, "utf8") : "";
+  const re = new RegExp(`${JARVIS_BEGIN}[\\s\\S]*?${JARVIS_END}`);
+  let changed;
+  if (re.test(txt)) {
+    const next = txt.replace(re, block);
+    changed = next !== txt; txt = next;
+  } else {
+    txt = (txt.trim() ? txt.replace(/\s*$/, "") + "\n\n" : "") + block + "\n";
+    changed = true;
+  }
+  fs.writeFileSync(file, txt);
+  return changed;
+}
+
+function ensureJarvisClaudeCode(cwd) {
+  // 1) persona en CLAUDE.md (always-on)
+  const claudeMd = path.join(cwd, "CLAUDE.md");
+  const ch = upsertMarkedBlock(claudeMd, jarvisPersonaBody());
+  ok(`ozali-jarvis ${ch ? "escrito" : "ya presente"} en ${c.bold("CLAUDE.md")} (orquestador por defecto).`);
+  // 2) subagente
+  const agentFile = path.join(cwd, ".claude", "agents", "ozali-jarvis.md");
+  ensureDir(path.dirname(agentFile));
+  fs.copyFileSync(path.join(TEMPLATES_SRC, "ozali-jarvis.md"), agentFile);
+  ok(`Subagente ${c.bold(".claude/agents/ozali-jarvis.md")} instalado.`);
+  // 3) hooks de recordatorio (idempotentes)
+  ensureJarvisHooks(cwd);
+}
+
+function ensureJarvisHooks(cwd) {
+  const p = path.join(cwd, ".claude", "settings.json");
+  const cfg = readJSON(p, {});
+  cfg.hooks = cfg.hooks || {};
+  const reminder = (msg) => ({ hooks: [{ type: "command", command: `echo '[ozali-jarvis] ${msg}'` }] });
+  const want = {
+    SessionStart: reminder("recall-first: confirma proyecto (mem_current_project) y recupera contexto de Engram (mem_context) antes de actuar."),
+    PreCompact: reminder("antes de compactar: persiste el state recuperable en Engram (engram-convention §4)."),
+    SessionEnd: reminder("cierre: registra lo trabajado en Engram (scope project, español) y haz mem_session_summary."),
+  };
+  let added = 0;
+  for (const [evt, val] of Object.entries(want)) {
+    const arr = cfg.hooks[evt] || (cfg.hooks[evt] = []);
+    // idempotencia: no duplicar el recordatorio ozali-jarvis para ese evento
+    const has = JSON.stringify(arr).includes("[ozali-jarvis]");
+    if (!has) { arr.push(val); added++; }
+  }
+  writeJSON(p, cfg);
+  if (added) ok(`Hooks de recordatorio de ozali-jarvis añadidos a ${c.bold(".claude/settings.json")} (${added}).`);
+  else info("Hooks de ozali-jarvis ya presentes en Claude Code.");
+}
+
+function ensureJarvisOpencode(cwd) {
+  // 1) persona en AGENTS.md
+  const agentsMd = path.join(cwd, "AGENTS.md");
+  const ch = upsertMarkedBlock(agentsMd, jarvisPersonaBody());
+  ok(`ozali-jarvis ${ch ? "escrito" : "ya presente"} en ${c.bold("AGENTS.md")} (orquestador por defecto).`);
+  // 2) agente en opencode.json
+  const p = path.join(cwd, "opencode.json");
+  const cfg = readJSON(p, {});
+  cfg.$schema = cfg.$schema || "https://opencode.ai/config.json";
+  cfg.agent = cfg.agent || {};
+  if (!cfg.agent["ozali-jarvis"]) {
+    cfg.agent["ozali-jarvis"] = {
+      mode: "primary",
+      description: "Orquestador del proyecto: memoria Engram + puente a la skill cdk.",
+      prompt: "{file:./AGENTS.md}",
+    };
+    writeJSON(p, cfg);
+    ok(`Agente ${c.bold("ozali-jarvis")} (primary) añadido a ${c.bold("opencode.json")}.`);
+  } else {
+    info("Agente ozali-jarvis ya presente en opencode.json.");
+  }
+  // 3) plugin de recordatorio
+  const plugin = path.join(cwd, ".opencode", "plugins", "ozali-jarvis.js");
+  if (!exists(plugin)) {
+    ensureDir(path.dirname(plugin));
+    fs.copyFileSync(path.join(TEMPLATES_SRC, "ozali-jarvis-plugin.js"), plugin);
+    ok(`Plugin ${c.bold(".opencode/plugins/ozali-jarvis.js")} instalado.`);
+  } else {
+    info("Plugin de ozali-jarvis ya presente en opencode.");
+  }
+}
+
 // Marca el proyecto como confiable en Claude Code (~/.claude.json). Sin esto, Claude Code
 // ignora los permisos de un .claude/settings.json de proyecto ("workspace not trusted").
 async function ensureClaudeWorkspaceTrust(cwd, opts) {
@@ -342,6 +448,13 @@ export function doctor(cwd) {
   add("Fuente de verdad", env.sot.found, env.sot.found ? `${env.sot.doc} + ${env.sot.dir}/` : "ausente (corre la skill 'ozali')");
   add("Skill ozali instalada", env.skill.installed, env.skill.installed ? env.skill.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   add("Engram", env.engram.available, env.engram.available ? env.engram.bin : "no instalado → modo docs");
+  if (env.engram.available) {
+    const online = tryExec("engram", ["doctor"], { cwd }) !== null;
+    add("Engram en línea", online, online ? "engram doctor OK" : "engram doctor no responde");
+  }
+  const jarvis = detectJarvis(cwd);
+  // jarvis es opt-in (--no-jarvis): informativo, no cuenta como fallo.
+  add("ozali-jarvis", true, jarvis.present ? `configurado (${jarvis.where.join(", ")})` : "no configurado (--no-jarvis)");
   const cloudOn = !!(cfg && cfg.cloud && cfg.cloud.enabled);
   // Cloud es opt-in: "off" es un estado válido (no cuenta como fallo).
   add("Engram Cloud", true, cloudOn ? `enrolado → ${cfg.cloud.server || "server por defecto"}` : "off (opt-in, git-sync activo)");
@@ -381,7 +494,29 @@ export function doctor(cwd) {
     }
   }
 
+  // Tendencia de uso de tokens (la escribe cdk en cada hito; informativo).
+  const metrics = readJSON(path.join(cwd, ".ozali", "metrics", "token-metrics.json"));
+  if (metrics && Array.isArray(metrics.hits) && metrics.hits.length) {
+    step("Tendencia de tokens (últimos hitos)");
+    for (const h of metrics.hits.slice(-3)) {
+      const saved = h.savedByRecall ? ` ${c.green("(ahorro recall: " + h.savedByRecall + ")")}` : "";
+      console.log(`  ${c.dim(h.hito || "?")}: total ${h.total ?? "N/A"}${saved}`);
+    }
+  }
+
   return bad === 0 ? 0 : 1;
+}
+
+/** Detecta si ozali-jarvis está configurado en el proyecto y dónde. */
+function detectJarvis(cwd) {
+  const where = [];
+  const hasBlock = (f) => exists(f) && fs.readFileSync(f, "utf8").includes(JARVIS_BEGIN);
+  if (hasBlock(path.join(cwd, "CLAUDE.md"))) where.push("CLAUDE.md");
+  if (hasBlock(path.join(cwd, "AGENTS.md"))) where.push("AGENTS.md");
+  if (exists(path.join(cwd, ".claude", "agents", "ozali-jarvis.md"))) where.push("subagente");
+  const oc = readJSON(path.join(cwd, "opencode.json"));
+  if (oc && oc.agent && oc.agent["ozali-jarvis"]) where.push("opencode");
+  return { present: where.length > 0, where };
 }
 
 function readStrictTdd(cwd, sot) {
@@ -494,5 +629,79 @@ export function sync(cwd, opts) {
       info("Sin remoto en el repo de conocimiento. Añade uno (git remote add origin …) para compartir con el equipo.");
     }
   }
+  return 0;
+}
+
+// ============================================================ audit ===========
+// Navega/audita la memoria de Engram: del proyecto actual o general (todos los
+// proyectos). Sin contexto de proyecto en la ruta → general. Sin Engram → audita
+// el histórico local de documentos.
+export async function audit(cwd, opts) {
+  step("ozali audit — auditoría de memoria (Engram)");
+  const env = detectAll(cwd);
+  const cfg = readJSON(CONFIG_PATH(cwd));
+  const engramCfg = readJSON(path.join(cwd, ".engram", "config.json"));
+  const project = (engramCfg && engramCfg.project_name) || (cfg && cfg.project) || projectName(cwd);
+  const hasProjectContext = env.git.isRepo || !!cfg || !!engramCfg;
+
+  // Resolver alcance: --general fuerza general; sin contexto → general; en repo se propone elegir.
+  let scope = (opts.general || !hasProjectContext) ? "general" : "project";
+  if (!hasProjectContext) info("Sin contexto de proyecto en esta ruta → auditoría " + c.bold("general") + ".");
+  else if (scope === "project" && !opts.general && !opts.yes) {
+    scope = await select("¿Qué auditoría quieres?", [
+      { value: "project", label: `Proyecto (${c.bold(project)})` },
+      { value: "general", label: "General (todos los proyectos en Engram)" },
+    ], 0);
+  }
+
+  // Sin Engram → auditar el histórico local de documentos.
+  if (!env.engram.available) {
+    warn("Engram no está instalado → auditoría desde documentos locales.");
+    return auditFromDocs(cwd, project);
+  }
+
+  // Navegador interactivo.
+  if (opts.tui) {
+    info("Abriendo el navegador interactivo de Engram (engram tui)…");
+    return spawnCmd("engram", ["tui"], { cwd });
+  }
+
+  if (scope === "general") {
+    step("Proyectos en Engram");
+    spawnCmd("engram", ["projects", "list"], { cwd });
+    step("Estadísticas (global)");
+    spawnCmd("engram", ["stats"], { cwd });
+    step("Contexto reciente");
+    spawnCmd("engram", ["context"], { cwd });
+  } else {
+    step(`Contexto reciente — ${project}`);
+    spawnCmd("engram", ["context", project], { cwd });
+    step("Estadísticas (global)");
+    spawnCmd("engram", ["stats"], { cwd });
+  }
+  if (opts.search) {
+    step(`Búsqueda: "${opts.search}"`);
+    spawnCmd("engram", ["search", opts.search], { cwd });
+  }
+  info("Navegación interactiva: " + c.bold("ozali audit --tui") + "  ·  búsqueda: " + c.bold('ozali audit --search "<texto>"'));
+  return 0;
+}
+
+function auditFromDocs(cwd, project) {
+  const docsDir = path.join(cwd, ".ozali", "docs", "cdk");
+  if (exists(docsDir)) {
+    step(`Hitos documentados localmente — ${project}`);
+    const hitos = fs.readdirSync(docsDir, { withFileTypes: true }).filter((e) => e.isDirectory());
+    if (hitos.length) for (const e of hitos) console.log("  • " + e.name);
+    else info("Aún no hay hitos en .ozali/docs/cdk/.");
+  } else {
+    info("No hay histórico local en .ozali/docs/cdk/ todavía.");
+  }
+  const metrics = readJSON(path.join(cwd, ".ozali", "metrics", "token-metrics.json"));
+  if (metrics && Array.isArray(metrics.hits) && metrics.hits.length) {
+    step("Uso de tokens (últimos hitos)");
+    for (const h of metrics.hits.slice(-5)) console.log(`  ${c.dim(h.hito || "?")}: total ${h.total ?? "N/A"}`);
+  }
+  info("Instala Engram para auditoría buscable/acumulativa (" + c.bold("ozali doctor") + ").");
   return 0;
 }

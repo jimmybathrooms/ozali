@@ -85,6 +85,7 @@ Lleva el histórico y la memoria al repo de conocimiento del equipo. Tus compañ
 | `ozali update` | Actualiza la skill a la última versión. |
 | `ozali sync` | Sube el histórico/memoria al repo de equipo. |
 | `ozali sync --import` | Baja lo que el equipo ya guardó. |
+| `ozali audit` | Navega/audita la memoria de Engram (qué se ha hecho). |
 
 ¿Algo no funciona? Corre **`ozali doctor`** primero: te dice qué falta y cómo arreglarlo.
 
@@ -119,6 +120,23 @@ Ejemplo — permitir Docker además de lo de fábrica:
 
 ---
 
+## ozali-jarvis: el orquestador (no necesitas /cdk)
+
+`init` crea **ozali-jarvis**, el "cerebro" por defecto de tu proyecto. A partir de ahí, **en cada
+sesión y sin escribir `/cdk`**, tu agente:
+
+- **recuerda** lo que el equipo trabajó antes (recupera contexto de Engram al iniciar),
+- **registra** lo que van haciendo (decisiones, acciones, aprendizajes) para que quede acumulado,
+- y cuando toca **escribir código con disciplina**, delega en la skill `cdk` (plan, aprobación, TDD).
+
+Sigues pudiendo invocar `/cdk` cuando quieras; jarvis simplemente lo usa como referencia y mantiene
+todo en contexto. ¿No lo quieres? `init --no-jarvis`.
+
+### Menos tokens, más contexto
+Con Engram en línea, jarvis y `cdk` trabajan **recall-first**: antes de releer archivos o re-analizar,
+reutilizan el análisis/resumen que ya está en memoria (si el código no cambió). Eso gasta **menos
+tokens** y mantiene el contexto enfocado. Puedes ver la tendencia de consumo con `ozali doctor`.
+
 ## Engram: la memoria del equipo (opcional)
 
 Durante `init`, ozali **instala Engram por ti**: en modo interactivo te pregunta (basta con aceptar),
@@ -141,6 +159,17 @@ Dos detalles si lo usas en equipo:
 Más detalle técnico en [engram-convention.md](../skill/references/engram-convention.md).
 
 ---
+
+## Auditar lo que se ha hecho (`ozali audit`)
+
+¿Quieres ver qué ha registrado el equipo? `ozali audit`:
+
+- **Dentro de un repo:** te propone auditar **ese proyecto** o **todos** (general).
+- **Fuera de un repo** (una ruta cualquiera): va directo a la auditoría **general**.
+
+Atajos: `ozali audit --tui` abre un navegador interactivo de la memoria; `ozali audit --search "rfc"`
+busca un término; `ozali audit --general` fuerza el alcance general. Si no tienes Engram, audita el
+histórico local de `.ozali/docs/`.
 
 ## Preguntas frecuentes
 

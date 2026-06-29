@@ -222,3 +222,50 @@ Internamente (Fase C lo implementa):
 
 > Trazabilidad: cada doc lleva `ultimo_commit`/`Commit:` del repo principal en su encabezado, así
 > el histórico aislado siempre apunta al código exacto que documenta.
+
+---
+
+## 7. Rendimiento: recall-first + telemetría de tokens
+
+El objetivo de esta sección es **gastar menos tokens y contexto** reutilizando lo que el equipo ya
+guardó en Engram, en vez de recomputarlo. Aplica tanto al uso **ambiental** (orquestador
+`ozali-jarvis`, sin `/cdk`) como por **hito** (`cdk`).
+
+### 7.1 Handshake "Engram en línea"
+Al iniciar sesión/hito: `mem_current_project` (confirma que coincide con `.engram/config.json`) +
+`mem_context`. Si responde → **modo recall-first activo**. Si no responde → degrada a `docs` (§1);
+la ausencia de Engram nunca bloquea.
+
+### 7.2 Recall-first con guard de staleness
+**Antes** de releer archivos o re-analizar, `mem_search` del `analisis` / `plan-aprobado` /
+`resumen-tecnico` del área. Cada artefacto lleva `ultimo_commit` (§6):
+
+- Si el **SHA actual coincide** (o los archivos del área no cambiaron) → **reusar** el resumen
+  conciso vía `mem_get_observation`, **sin releer el código**. Ahorra tokens de entrada.
+- Si **cambió** → re-analizar **solo el delta** (los archivos tocados desde `ultimo_commit`), no todo.
+
+> El harness `verify-structure.mjs` (estructural, barato) puede seguir corriendo; lo que se evita es
+> **releer archivos grandes** que ya tienen un resumen vigente en memoria.
+
+### 7.3 Recuperación selectiva
+`mem_search` devuelve **previews truncados**. Haz `mem_get_observation` **solo** de los pocos
+artefactos que realmente necesitas. **Nunca** vuelques toda la memoria al contexto.
+
+### 7.4 Restauración tras compactación
+Tras una compactación (o reabrir sesión), reconstruye desde `state` (§4) + `bitacora` —ambos
+concisos— en vez de re-derivar todo el contexto releyendo conversación y archivos.
+
+### 7.5 Guardar conciso para recall barato
+Guarda resúmenes **estructurados y deduplicados** (no volcados crudos). Mientras más conciso el
+artefacto, menos cuesta recuperarlo después.
+
+### 7.6 Telemetría de tokens (medir → mejorar)
+- Espeja el uso de tokens del hito a `cdk/{hito}/uso-tokens` y mantén un agregado por proyecto en
+  `cdk/_project/token-metrics`.
+- También escribe un resumen **local** en `.ozali/metrics/token-metrics.json` (últimos N hitos:
+  `{ hito, input, output, total, savedByRecall, at }`) para que `ozali doctor` muestre la tendencia
+  sin consultar el MCP.
+- **Al iniciar**, recupera `cdk/_project/token-metrics`: si hitos similares fueron pesados, sé más
+  agresivo con recall-first (resume antes, evita relecturas grandes).
+
+> `savedByRecall` = estimación de relectura evitada por reusar memoria (ver plantilla `06-uso-tokens`).

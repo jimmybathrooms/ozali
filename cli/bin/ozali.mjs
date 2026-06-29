@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -17,6 +17,7 @@ ${c.bold("Comandos:")}
   doctor    Health-check read-only del proyecto (fuente de verdad, Engram, TDD…).
   update    Actualiza la skill ozali instalada a la versión de este paquete.
   sync      Sincroniza el histórico (docs + Engram) con el repo de conocimiento.
+  audit     Navega/audita la memoria de Engram del proyecto (o general).
 
 ${c.bold("Opciones comunes:")}
   --yes, -y            No interactivo: usa defaults.
@@ -26,9 +27,13 @@ ${c.bold("Opciones comunes:")}
   --knowledge-repo <p> (init) Ruta del repo de conocimiento.
   --no-engram          (init) No usar Engram; arranca en modo docs.
   --no-trust           (init) No marcar el workspace como confiable en Claude Code.
+  --no-jarvis          (init) No crear el orquestador ozali-jarvis.
   --import             (sync) Importa del repo de conocimiento a local.
   --push               (sync) Hace push al remoto del repo de conocimiento.
   --cloud              (sync) Replica también a Engram Cloud (si está habilitado).
+  --general            (audit) Auditoría general (todos los proyectos en Engram).
+  --tui                (audit) Abre el navegador interactivo de Engram.
+  --search <q>         (audit) Busca <q> en la memoria.
   -h, --help           Esta ayuda.    -v, --version   Versión.
 
 ${c.bold("Instalación segura:")}
@@ -48,6 +53,10 @@ function parseArgs(argv) {
     else if (a === "--cloud") opts.cloud = true;
     else if (a === "--no-engram") opts.noEngram = true;
     else if (a === "--no-trust") opts.noTrust = true;
+    else if (a === "--no-jarvis") opts.noJarvis = true;
+    else if (a === "--general") opts.general = true;
+    else if (a === "--tui") opts.tui = true;
+    else if (a === "--search") opts.search = argv[++i];
     else if (a === "--agent") opts.agent = argv[++i];
     else if (a === "--scope") opts.scope = argv[++i];
     else if (a === "--knowledge-repo") opts.knowledgeRepo = argv[++i];
@@ -71,6 +80,7 @@ async function main() {
     case "doctor": return doctor(cwd);
     case "update": return update(cwd);
     case "sync": return sync(cwd, opts);
+    case "audit": return await audit(cwd, opts);
     default:
       err(`comando desconocido "${cmd}". Usa ${c.bold("ozali --help")}.`);
       return 1;
