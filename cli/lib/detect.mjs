@@ -1,7 +1,7 @@
 // detect.mjs — detección read-only del entorno del proyecto destino.
 import fs from "node:fs";
 import path from "node:path";
-import { exists, which, gitInfo, nodeMajor, HOME } from "./util.mjs";
+import { exists, which, gitInfo, nodeMajor, HOME, readJSON } from "./util.mjs";
 
 /** Variante de fuente de verdad: {found, doc, dir, variant} */
 export function detectSourceOfTruth(cwd) {
@@ -45,6 +45,13 @@ export function detectInstalledSkill(cwd) {
 export function detectEngram() {
   const bin = which("engram");
   return { available: !!bin, bin: bin || null };
+}
+
+/** Metadatos compartibles de Engram Cloud del proyecto (sin secretos). */
+export function detectCloud(cwd) {
+  const metaPath = path.join(cwd, ".ozali", "cloud.json");
+  const meta = readJSON(metaPath);
+  return { present: !!meta, path: metaPath, meta: meta || null };
 }
 
 /**
@@ -98,6 +105,7 @@ export function detectAll(cwd) {
     agents: detectAgents(cwd),
     skill: detectInstalledSkill(cwd),
     engram: detectEngram(),
+    cloud: detectCloud(cwd),
     testing: detectTesting(cwd),
   };
 }

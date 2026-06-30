@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync, audit } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit, cloud } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -18,6 +18,7 @@ ${c.bold("Comandos:")}
   update    Actualiza la instalación (skill ozali + ozali-jarvis + permisos) al paquete.
   sync      Sincroniza el histórico (docs + Engram) con el repo de conocimiento.
   audit     Navega/audita la memoria de Engram del proyecto (o general).
+  cloud     Gestiona Engram Cloud: status, upgrade, repair, dashboard, config.
 
 ${c.bold("Opciones comunes:")}
   --yes, -y            No interactivo: usa defaults.
@@ -34,6 +35,10 @@ ${c.bold("Opciones comunes:")}
   --general            (audit) Auditoría general (todos los proyectos en Engram).
   --tui                (audit) Abre el navegador interactivo de Engram.
   --search <q>         (audit) Busca <q> en la memoria.
+  --dashboard          (audit) Abre el dashboard de Engram Cloud en el navegador.
+  --conflicts          (audit) Lista conflictos de memoria pendientes.
+  --judged             (audit --conflicts) Muestra conflictos ya juzgados.
+  --stats              (audit --conflicts) Estadísticas de conflictos.
   -h, --help           Esta ayuda.    -v, --version   Versión.
 
 ${c.bold("Instalación segura:")}
@@ -57,6 +62,10 @@ function parseArgs(argv) {
     else if (a === "--general") opts.general = true;
     else if (a === "--tui") opts.tui = true;
     else if (a === "--search") opts.search = argv[++i];
+    else if (a === "--dashboard") opts.dashboard = true;
+    else if (a === "--conflicts") opts.conflicts = true;
+    else if (a === "--judged") opts.judged = true;
+    else if (a === "--stats") opts.stats = true;
     else if (a === "--agent") opts.agent = argv[++i];
     else if (a === "--scope") opts.scope = argv[++i];
     else if (a === "--knowledge-repo") opts.knowledgeRepo = argv[++i];
@@ -83,6 +92,7 @@ async function main() {
     case "update": return update(cwd, opts);
     case "sync": return sync(cwd, opts);
     case "audit": return await audit(cwd, opts);
+    case "cloud": return await cloud(cwd, opts);
     default:
       err(`comando desconocido "${cmd}". Usa ${c.bold("ozali --help")}.`);
       return 1;

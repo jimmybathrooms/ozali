@@ -90,8 +90,10 @@ los destructivos. Es un template — tus reglas se conservan al re-correr `init`
 confiable (`hasTrustDialogAccepted` en `~/.claude.json`); usa `--no-trust` para omitirlo.
 
 `init` también **instala Engram** y registra su MCP con `engram setup <agente>`: en modo
-interactivo te pregunta (default sí), y con `--yes` lo instala automáticamente. Usa brew en
-macOS/Linux, `go install` en Windows, con binario precompilado como fallback. Si prefieres no
+interactivo te pregunta (default sí), y con `--yes` lo instala automáticamente. En **Linux**
+descarga el **binario precompilado** correcto según tu arquitectura (amd64/arm64) a `~/.local/bin`
+(sin sudo); en **macOS** usa brew → `go install` con el binario como fallback; en **Windows**
+usa `go install`. Si algún paso falla, imprime instrucciones específicas de tu SO. Si prefieres no
 instalarlo, pasa `--no-engram` (arranca en modo `docs`). Opcionalmente habilita **Engram Cloud**
 (réplica de equipo opt-in) además del git-sync.
 
@@ -119,6 +121,8 @@ Claude Code y opencode (perfiles de permisos para ambos en
 | Uso previsto (modelo mental) | [docs/intended-usage.md](docs/intended-usage.md) |
 | Seguridad del instalador (npx/pnpm) | [docs/security.md](docs/security.md) |
 | Histórico aislado y memoria de equipo | [docs/team-history.md](docs/team-history.md) |
+| Desplegar Engram Cloud (VPS) | [docs/deploy-cloud-vps.md](docs/deploy-cloud-vps.md) |
+| Desplegar Engram Cloud (Google Cloud) | [docs/deploy-cloud-gcloud.md](docs/deploy-cloud-gcloud.md) |
 | Skill bootstrap | [skill/SKILL.md](skill/SKILL.md) |
 | Calibración de testing + TDD | [skill/references/calibration-blueprint.md](skill/references/calibration-blueprint.md) |
 | Blueprint de agentes | [skill/references/agents-blueprint.md](skill/references/agents-blueprint.md) |

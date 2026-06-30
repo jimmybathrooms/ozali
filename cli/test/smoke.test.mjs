@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { engramAssetName } from "../lib/util.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.resolve(HERE, "..", "bin", "ozali.mjs");
@@ -149,4 +150,53 @@ test("el paquete NO tiene dependencias ni lifecycle scripts (seguridad)", () => 
   for (const s of ["preinstall", "install", "postinstall", "preuninstall", "postuninstall", "prepare"]) {
     assert.ok(!(pkg.scripts && pkg.scripts[s]), `sin script de ciclo de vida: ${s}`);
   }
+});
+
+test("--help menciona el comando cloud", () => {
+  const { stdout } = run(["--help"]);
+  assert.match(stdout, /cloud/, "help debe mencionar cloud");
+  assert.match(stdout, /--dashboard/, "help debe mencionar --dashboard");
+  assert.match(stdout, /--conflicts/, "help debe mencionar --conflicts");
+});
+
+test("cloud status imprime cabecera y no rompe", () => {
+  const dir = tmpProject();
+  try {
+    const { code, stdout } = run(["cloud", "status"], dir, true);
+    assert.match(stdout, /ozali cloud status/, "debe imprimir cabecera de cloud status");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cloud con subcomando desconocido sale con código 1", () => {
+  const dir = tmpProject();
+  try {
+    const { code, stdout } = run(["cloud", "frobnicate"], dir, true);
+    assert.equal(code, 1, "debe salir con código 1");
+    assert.match(stdout, /Subcomando desconocido/, "debe indicar subcomando desconocido");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test(".gitignore del repo destino permite .ozali/cloud.json (commiteable)", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    const gi = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
+    assert.match(gi, /\.ozali\/\*/, "debe ignorar .ozali/*");
+    assert.match(gi, /!\.ozali\/cloud\.json/, "debe permitir .ozali/cloud.json");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("engramAssetName respeta la convención de release por SO/arch", () => {
+  assert.equal(engramAssetName("linux", "x64", "1.17.0"), "engram_1.17.0_linux_amd64.tar.gz");
+  assert.equal(engramAssetName("linux", "arm64", "1.17.0"), "engram_1.17.0_linux_arm64.tar.gz");
+  assert.equal(engramAssetName("darwin", "arm64", "1.17.0"), "engram_1.17.0_darwin_arm64.tar.gz");
+  assert.equal(engramAssetName("win32", "x64", "1.17.0"), "engram_1.17.0_windows_amd64.zip");
+  assert.equal(engramAssetName("linux", "ia32", "1.17.0"), null, "arch no soportada → null");
+  assert.equal(engramAssetName("freebsd", "x64", "1.17.0"), null, "SO no soportado → null");
 });

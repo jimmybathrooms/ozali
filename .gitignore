@@ -1,7 +1,8 @@
 # Histórico aislado: nunca se commitea en el repo principal del proyecto.
 # (En el repo de la HERRAMIENTA ozali esto casi no aplica, pero se documenta el patrón
 #  que el CLI inyecta en el .gitignore de los repos destino.)
-.ozali/
+.ozali/*
+!.ozali/cloud.json
 .engram/
 
 # Node

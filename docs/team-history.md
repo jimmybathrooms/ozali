@@ -64,3 +64,55 @@ histórico apunta a un commit exacto.
 
 El contrato concreto de qué se espeja a Engram, cuándo, y el algoritmo de `ozali sync` está en
 [skill/references/engram-convention.md](../skill/references/engram-convention.md) (§3 y §6).
+
+## Engram Cloud: réplica en tiempo real (opt-in)
+
+Además del git-sync, ozali soporta **Engram Cloud** — un servidor central que replica la memoria
+del equipo **en tiempo real** (autosync), sin necesidad de commit/push manual.
+
+### Modelo: cloud-first, git-sync como backup
+
+```
+dev A guarda memoria → autosync → cloud → dev B (autosync recibe)
+                                ↕
+                    git-sync (backup/secondary, repos de conocimiento)
+```
+
+- **Cloud-first**: la réplica es automática e invisible. El repo de conocimiento sigue siendo
+  el backup offline y el canal para docs (que no van a cloud).
+- **Sin cloud**: todo funciona igual con git-sync manual (`ozali sync` + `--push`/`--import`).
+
+### Onboarding de equipo (un dev nuevo en 1 paso)
+
+Cuando un dev nuevo hace `ozali init` en un repo que ya tiene `.ozali/cloud.json` (commiteable,
+sin secretos), el CLI detecta la cloud del equipo y ofrece conectarse automáticamente:
+
+```
+$ ozali init
+✓ Engram Cloud del equipo detectado (servidor: https://engram.mi-empresa.com)
+  → Proyecto: "ozali"
+  → ¿Conectarte a la memoria del equipo? [sí/no]
+  → token: ****
+  → Recibiendo memoria del equipo…
+  → autosync activo (invisible)
+  → Listo.
+```
+
+### Despliegue del servidor
+
+Ver [docs/deploy-cloud-vps.md](deploy-cloud-vps.md) (VPS genérico con docker-compose) y
+[docs/deploy-cloud-gcloud.md](deploy-cloud-gcloud.md) (Google Cloud: Cloud Run o GCE VM).
+
+### Comandos cloud
+
+| Comando | Qué hace |
+|---|---|
+| `ozali sync --cloud` | Push manual a cloud |
+| `ozali sync --cloud --import` | Pull desde cloud (onboarding inverso) |
+| `ozali cloud status` | Estado + último sync + upgrade |
+| `ozali cloud upgrade` | doctor → repair → bootstrap |
+| `ozali cloud dashboard` | Abre el dashboard web |
+| `ozali cloud config` | Re-configura servidor/token |
+
+Detalle del contrato de memoria cloud (scope, idioma, conflictos, troubleshooting) en
+[skill/references/engram-convention.md](../skill/references/engram-convention.md) §8.

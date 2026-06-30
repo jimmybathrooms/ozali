@@ -1,20 +1,85 @@
 // commands.mjs — implementación de init / doctor / update / sync.
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import {
   c, ok, warn, err, info, step,
   SKILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
-  ensureGitignore, tryExec, spawnCmd, which,
-  projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME,
+  ensureGitignore, tryExec, spawnCmd, which, engramAssetName,
+  projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL,
 } from "./util.mjs";
 import { detectAll } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
 
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
+const TEAM_CLOUD_PATH = (cwd) => path.join(cwd, ".ozali", "cloud.json");
+const ENGRAM_CONFIG_PATH = (cwd) => path.join(cwd, ".engram", "config.json");
+const CLOUD_TOKEN_ENV = "ENGRAM_CLOUD_TOKEN";
+const CLOUD_AUTOSYNC_ENV = "ENGRAM_CLOUD_AUTOSYNC";
+const CLOUD_SERVER_ENV = "ENGRAM_CLOUD_SERVER";
 
 function skillTarget(cwd, scope) {
   const base = scope === "global" ? path.join(process.env.HOME || "", ".claude") : path.join(cwd, ".claude");
   return path.join(base, "skills", "ozali");
+}
+
+function readTeamCloud(cwd) {
+  return readJSON(TEAM_CLOUD_PATH(cwd));
+}
+
+function writeTeamCloud(cwd, cloud) {
+  writeJSON(TEAM_CLOUD_PATH(cwd), {
+    server: cloud.server,
+    project: cloud.project,
+    enrolled: !!cloud.enabled,
+    auth_required: cloud.authRequired !== false,
+    token_env: cloud.tokenEnv || CLOUD_TOKEN_ENV,
+    autosync_env: cloud.autosyncEnv || CLOUD_AUTOSYNC_ENV,
+    dashboard: cloudDashboardURL(cloud.server),
+    updated_at: new Date().toISOString(),
+  });
+}
+
+function firstNonEmpty(...values) {
+  return values.find((value) => typeof value === "string" && value.trim()) || null;
+}
+
+function firstLine(text, fallback = "") {
+  if (!text) return fallback;
+  const line = String(text).split(/\r?\n/).map((part) => part.trim()).find(Boolean);
+  return line || fallback;
+}
+
+function printIndented(text) {
+  if (!text) return;
+  for (const line of String(text).split(/\r?\n/)) console.log(`  ${c.dim(line)}`);
+}
+
+function cloudDashboardURL(server) {
+  if (!server) return null;
+  return server.replace(/\/+$/, "") + "/dashboard";
+}
+
+function hasCloudToken() {
+  return !!firstNonEmpty(process.env[CLOUD_TOKEN_ENV]);
+}
+
+function extractReasonCode(text) {
+  if (!text) return null;
+  const match = firstLine(text).match(/(?:reason(?:_code)?|reasonCode)\s*[:=]\s*([a-z_]+)/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+function syncCloudProject(cwd, project) {
+  return tryExec("engram", ["sync", "--cloud", "--project", project], { cwd });
+}
+
+function cloudStatusSnapshot(cwd, project) {
+  return {
+    syncStatus: tryExec("engram", ["sync", "--cloud", "--status", "--project", project], { cwd }),
+    upgradeStatus: tryExec("engram", ["cloud", "upgrade", "status", "--project", project], { cwd }),
+    conflictsStats: tryExec("engram", ["conflicts", "stats", "--project", project], { cwd }),
+  };
 }
 
 // ============================================================ init ===========
@@ -88,7 +153,13 @@ export async function init(cwd, opts) {
   // Engram Cloud (opt-in) — réplica de equipo además del git-sync. Solo si Engram quedó disponible.
   let cloud = { enabled: false };
   if (memoryMode === "hybrid" && !opts.dryRun) {
-    cloud = await maybeEnableEngramCloud(projectName(cwd), opts);
+    const teamCloud = readTeamCloud(cwd);
+    if (teamCloud && teamCloud.enrolled) {
+      // Fase 1: dev nuevo en un repo que ya tiene .ozali/cloud.json del equipo
+      cloud = await connectTeamCloud(cwd, teamCloud, opts);
+    } else {
+      cloud = await maybeEnableEngramCloud(cwd, projectName(cwd), opts);
+    }
   }
 
   if (opts.dryRun) { warn("--dry-run: no escribo nada. Plan mostrado arriba."); return 0; }
@@ -115,7 +186,7 @@ export async function init(cwd, opts) {
   if (!opts.noJarvis) {
     const proj = projectName(cwd);
     // Fija el proyecto para escrituras deterministas de memoria (se deriva igual por cada miembro).
-    writeJSON(path.join(cwd, ".engram", "config.json"), { project_name: proj });
+    writeJSON(ENGRAM_CONFIG_PATH(cwd), { project_name: proj });
     ok(`Proyecto de memoria fijado en ${c.bold(".engram/config.json")} (${proj}).`);
     if (agent === "claude-code" || agent === "both") ensureJarvisClaudeCode(cwd);
     if (agent === "opencode" || agent === "both") ensureJarvisOpencode(cwd);
@@ -123,7 +194,7 @@ export async function init(cwd, opts) {
 
   // 3) gitignore del histórico aislado
   if (env.git.isRepo) {
-    const { added } = ensureGitignore(cwd, [".ozali/", ".engram/"]);
+    const { added } = ensureGitignore(cwd, [".ozali/*", "!.ozali/cloud.json", ".engram/"]);
     if (added.length) ok(`.gitignore actualizado: ${added.join(", ")} (histórico aislado del repo principal).`);
     else info(".gitignore ya aislaba el histórico.");
   }
@@ -167,14 +238,28 @@ export async function init(cwd, opts) {
 
 /**
  * Instala Engram con la mejor ruta disponible para el SO actual.
- * macOS/Linux: Homebrew (recomendado) o Go install como fallback.
+ * Linux: binario precompilado (auto-descarga, sin toolchain) con brew/go como alternativas.
+ * macOS: Homebrew → Go → binario precompilado como fallback.
  * Windows: Go install (recomendado) o binario manual.
  * Devuelve true si el binario quedó disponible en PATH.
  */
 function installEngram() {
   const plat = process.platform;
 
-  if (plat === "darwin" || plat === "linux") {
+  if (plat === "linux") {
+    // En Linux Homebrew es poco común: el binario precompilado es la vía universal sin toolchain.
+    if (installEngramFromTarball()) return true;
+    if (which("brew")) {
+      info("Instalando: " + c.bold("brew install gentleman-programming/tap/engram"));
+      spawnCmd("brew", ["install", "gentleman-programming/tap/engram"]);
+    } else if (which("go")) {
+      info("Compilando con Go: " + c.bold("go install github.com/Gentleman-Programming/engram/cmd/engram@latest"));
+      spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
+    } else {
+      warn("No pude instalar Engram automáticamente. Sigue las instrucciones de abajo.");
+      return false;
+    }
+  } else if (plat === "darwin") {
     if (which("brew")) {
       info("Instalando: " + c.bold("brew install gentleman-programming/tap/engram"));
       spawnCmd("brew", ["install", "gentleman-programming/tap/engram"]);
@@ -182,8 +267,10 @@ function installEngram() {
       info("Homebrew no encontrado — instalando con Go:");
       info("  " + c.bold("go install github.com/Gentleman-Programming/engram/cmd/engram@latest"));
       spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
+    } else if (installEngramFromTarball()) {
+      return true;
     } else {
-      warn("No se encontró Homebrew ni Go. Opciones de instalación:");
+      warn("No se encontró Homebrew ni Go y falló la descarga del binario. Opciones:");
       info("  a) Homebrew " + c.dim("(recomendado)") + ": " + c.cyan("https://brew.sh") + " → " + c.bold("brew install gentleman-programming/tap/engram"));
       info("  b) Binario precompilado: " + c.cyan("https://github.com/Gentleman-Programming/engram/releases"));
       return false;
@@ -210,11 +297,159 @@ function installEngram() {
   return false;
 }
 
+const ENGRAM_RELEASES_API = "https://api.github.com/repos/Gentleman-Programming/engram/releases/latest";
+const ENGRAM_RELEASES_DL = "https://github.com/Gentleman-Programming/engram/releases/download";
+
+/** Última versión publicada de Engram (sin la "v" inicial), o null si no hay red. */
+function latestEngramVersion() {
+  let raw = null;
+  if (which("curl")) raw = tryExec("curl", ["-fsSL", ENGRAM_RELEASES_API]);
+  else if (which("wget")) raw = tryExec("wget", ["-qO-", ENGRAM_RELEASES_API]);
+  if (!raw) return null;
+  try {
+    const tag = JSON.parse(raw).tag_name;
+    return tag ? String(tag).replace(/^v/, "") : null;
+  } catch { return null; }
+}
+
+/** Descarga url → dest con curl (o wget como fallback). Devuelve true si tuvo éxito. */
+function download(url, dest) {
+  if (which("curl")) return spawnCmd("curl", ["-fL", "--retry", "2", "-o", dest, url]) === 0;
+  if (which("wget")) return spawnCmd("wget", ["-O", dest, url]) === 0;
+  warn("No se encontró curl ni wget para descargar el binario de Engram.");
+  return false;
+}
+
+/** Busca recursivamente un ejecutable llamado "engram" dentro de dir (1 nivel basta). */
+function findEngramBinary(dir) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isFile() && e.name === "engram") return full;
+    if (e.isDirectory()) {
+      const nested = findEngramBinary(full);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+/**
+ * Instala Engram bajando el binario precompilado del release más reciente (linux/macOS).
+ * Lo coloca en ~/.local/bin (sin sudo) y lo antepone al PATH del proceso para que los
+ * `engram setup <agente>` posteriores lo encuentren en esta misma corrida.
+ * Node-14-safe: usa curl/wget + tar vía execFileSync (sin fetch global). Devuelve true si quedó listo.
+ */
+function installEngramFromTarball() {
+  const plat = process.platform;
+  if (plat !== "linux" && plat !== "darwin") return false;
+
+  // Falla rápido si la arquitectura no tiene binario publicado (versión irrelevante para esta validación).
+  if (!engramAssetName(plat, process.arch, "0")) {
+    warn(`Arquitectura no soportada para el binario precompilado (${process.arch}).`);
+    return false;
+  }
+
+  const version = latestEngramVersion();
+  if (!version) {
+    warn("No pude resolver la última versión de Engram (¿sin red o sin curl/wget?).");
+    return false;
+  }
+
+  const asset = engramAssetName(plat, process.arch, version);
+  const url = `${ENGRAM_RELEASES_DL}/v${version}/${asset}`;
+  info(`Descargando binario precompilado de Engram ${c.bold("v" + version)} (${process.arch})…`);
+
+  let tmpDir;
+  try { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-engram-")); }
+  catch { warn("No pude crear un directorio temporal para la descarga."); return false; }
+
+  const tarball = path.join(tmpDir, asset);
+  if (!download(url, tarball)) { warn("Falló la descarga del binario de Engram."); return false; }
+
+  if (spawnCmd("tar", ["-xzf", tarball, "-C", tmpDir]) !== 0) {
+    warn("Falló la extracción del tarball de Engram (¿tar disponible?).");
+    return false;
+  }
+
+  const binSrc = findEngramBinary(tmpDir);
+  if (!binSrc) { warn("No encontré el binario engram dentro del tarball."); return false; }
+
+  const destDir = path.join(HOME, ".local", "bin");
+  const dest = path.join(destDir, "engram");
+  try {
+    ensureDir(destDir);
+    fs.copyFileSync(binSrc, dest);
+    fs.chmodSync(dest, 0o755);
+  } catch (e) {
+    warn(`No pude instalar el binario en ${destDir} (${e.message}).`);
+    return false;
+  }
+
+  // Disponible en esta corrida para los `engram setup` que vienen después.
+  const onPath = (process.env.PATH || "").split(path.delimiter).includes(destDir);
+  if (!onPath) process.env.PATH = destDir + path.delimiter + (process.env.PATH || "");
+
+  ok(`Engram instalado en ${c.bold(dest)}.`);
+  if (!onPath) {
+    warn(`${c.bold(destDir)} no estaba en tu PATH. Para usar ${c.bold("engram")} fuera del agente, añádelo a tu shell:`);
+    console.log(`    ${c.dim('export PATH="$HOME/.local/bin:$PATH"')}`);
+  }
+  return true;
+}
+
+/**
+ * Fase 1: Onboarding de equipo. Un dev nuevo hace `ozali init` en un repo que ya tiene
+ * .ozali/cloud.json (commiteable). Detecta la cloud del equipo y ofrece conectarse en 1 paso.
+ */
+async function connectTeamCloud(cwd, cloudMeta, opts) {
+  const project = cloudMeta.project || projectName(cwd);
+  ok(`Engram Cloud del equipo detectado (servidor: ${c.bold(cloudMeta.server || "por defecto")})`);
+  info(`  → Proyecto: "${project}"`);
+  const connect = await confirm("¿Conectarte a la memoria del equipo?", true);
+  if (!connect) {
+    info("Cloud del equipo omitido. Puedes conectarte después con " + c.bold("ozali cloud config") + ".");
+    return { enabled: false, server: cloudMeta.server };
+  }
+  const token = await ask("Token de autenticación (ENGRAM_CLOUD_TOKEN)");
+  if (!token) {
+    warn("Sin token no se puede conectar (modo autenticado obligatorio). Continúo con git-sync.");
+    return { enabled: false, server: cloudMeta.server };
+  }
+  const server = cloudMeta.server || "http://127.0.0.1:18080";
+  info(`Configurando Engram Cloud → ${server}`);
+  spawnCmd("engram", ["cloud", "config", "--server", server]);
+  process.env[CLOUD_TOKEN_ENV] = token;
+  info(`Enrolando el proyecto "${project}"…`);
+  if (spawnCmd("engram", ["cloud", "enroll", project]) !== 0) {
+    warn("No se pudo enrolar. Verifica el token y el servidor. Continúo con git-sync.");
+    return { enabled: false, server };
+  }
+  writeTeamCloud(cwd, { enabled: true, server, project, authRequired: true });
+  configureCloudAutosync(cwd, opts);
+  persistCloudToken(token, opts);
+  ok("Conectado a Engram Cloud del equipo.");
+  // Recibir la memoria del equipo (pull desde cloud)
+  info("Recibiendo memoria del equipo…");
+  const pullOut = tryExec("engram", ["sync", "--cloud", "--import", "--project", project], { cwd });
+  if (pullOut !== null) {
+    ok("Memoria del equipo recibida.");
+    if (pullOut.trim()) printIndented(pullOut);
+    // Importar chunks locales
+    if (spawnCmd("engram", ["sync", "--import"], { cwd }) === 0) ok("Memorias importadas a Engram local.");
+  } else {
+    warn("No se pudo recibir la memoria del equipo. Corre " + c.bold("ozali sync --cloud --import") + " más tarde.");
+  }
+  return { enabled: true, server, token };
+}
+
 /**
  * Engram Cloud opt-in: réplica de equipo en tiempo real, adicional al git-sync.
- * Configura el servidor y enrola el proyecto. Devuelve { enabled, server }.
+ * Modo autenticado obligatorio: siempre pide token. Configura autosync en el agente.
+ * Devuelve { enabled, server, token }.
  */
-async function maybeEnableEngramCloud(project, opts) {
+async function maybeEnableEngramCloud(cwd, project, opts) {
   if (opts.yes) return { enabled: false };
   const enable = await confirm("¿Habilitar Engram Cloud para el equipo? (réplica opt-in, requiere un servidor)", false);
   if (!enable) {
@@ -222,21 +457,100 @@ async function maybeEnableEngramCloud(project, opts) {
     return { enabled: false };
   }
   const server = await ask("URL del servidor de Engram Cloud", "http://127.0.0.1:18080");
+  const token = await ask("Token de autenticación (ENGRAM_CLOUD_TOKEN)");
+  if (!token) {
+    warn("Sin token no se puede configurar Engram Cloud (modo autenticado obligatorio). Continúo con git-sync.");
+    return { enabled: false, server };
+  }
   info(`Configurando Engram Cloud → ${server}`);
   spawnCmd("engram", ["cloud", "config", "--server", server]);
+  process.env[CLOUD_TOKEN_ENV] = token;
   info(`Enrolando el proyecto "${project}"…`);
   if (spawnCmd("engram", ["cloud", "enroll", project]) === 0) {
+    writeTeamCloud(cwd, { enabled: true, server, project, authRequired: true });
+    configureCloudAutosync(cwd, opts);
+    persistCloudToken(token, opts);
     ok("Engram Cloud habilitado. Replica con " + c.bold("ozali sync --cloud") + ".");
-    return { enabled: true, server };
+    const dash = cloudDashboardURL(server);
+    if (dash) {
+      info(`Dashboard: ${c.cyan(dash)}`);
+      if (await confirm("¿Abrir el dashboard en el navegador?", false)) openURL(dash);
+    }
+    return { enabled: true, server, token };
   }
   warn("No se pudo enrolar el proyecto en Engram Cloud. Continúo solo con git-sync.");
   return { enabled: false, server };
 }
 
+/**
+ * Configura ENGRAM_CLOUD_AUTOSYNC=1 (y ENGRAM_CLOUD_TOKEN) en el bloque env del MCP
+ * de Engram del agente, para que la réplica sea automática e invisible.
+ */
+function configureCloudAutosync(cwd, opts) {
+  const agent = opts.agent || "claude-code";
+  const token = process.env[CLOUD_TOKEN_ENV] || "";
+  // Claude Code: .claude/settings.json → mcpServers.engram.env
+  if (agent === "claude-code" || agent === "both") {
+    const p = path.join(cwd, ".claude", "settings.json");
+    const cfg = readJSON(p, {});
+    cfg.mcpServers = cfg.mcpServers || {};
+    cfg.mcpServers.engram = cfg.mcpServers.engram || {};
+    cfg.mcpServers.engram.env = cfg.mcpServers.engram.env || {};
+    cfg.mcpServers.engram.env[CLOUD_AUTOSYNC_ENV] = "1";
+    if (token) cfg.mcpServers.engram.env[CLOUD_TOKEN_ENV] = token;
+    writeJSON(p, cfg);
+    ok(`Autosync de Engram Cloud configurado en ${c.bold(".claude/settings.json")} (mcpServers.engram.env).`);
+  }
+  // opencode: opencode.json → mcp.engram.env
+  if (agent === "opencode" || agent === "both") {
+    const p = path.join(cwd, "opencode.json");
+    const cfg = readJSON(p, {});
+    cfg.mcp = cfg.mcp || {};
+    cfg.mcp.engram = cfg.mcp.engram || {};
+    if (cfg.mcp.engram.env === undefined || typeof cfg.mcp.engram.env !== "object") {
+      cfg.mcp.engram.env = {};
+    } else {
+      cfg.mcp.engram.env = { ...cfg.mcp.engram.env };
+    }
+    cfg.mcp.engram.env[CLOUD_AUTOSYNC_ENV] = "1";
+    if (token) cfg.mcp.engram.env[CLOUD_TOKEN_ENV] = token;
+    writeJSON(p, cfg);
+    ok(`Autosync de Engram Cloud configurado en ${c.bold("opencode.json")} (mcp.engram.env).`);
+  }
+}
+
+/**
+ * Persiste el token de Engram Cloud para sesiones futuras.
+ * 1) ~/.engram/cloud_token (default de Engram)
+ * 2) Avisa al usuario que añada la env var a su shell rc si quiere uso fuera del agente.
+ */
+function persistCloudToken(token, opts) {
+  const tokenPath = path.join(HOME, ".engram", "cloud_token");
+  try {
+    ensureDir(path.dirname(tokenPath));
+    fs.writeFileSync(tokenPath, token + "\n", { mode: 0o600 });
+    ok(`Token guardado en ${c.bold("~/.engram/cloud_token")} (permisos 600).`);
+  } catch {
+    warn("No pude escribir ~/.engram/cloud_token. Guarda el token manualmente.");
+  }
+  const shell = process.env.SHELL || "";
+  const rc = shell.includes("zsh") ? "~/.zshrc" : shell.includes("bash") ? "~/.bashrc" : null;
+  if (rc) {
+    info(`Para usar Engram Cloud fuera del agente, añade a ${c.bold(rc)}:`);
+    console.log(`    ${c.dim(`export ${CLOUD_TOKEN_ENV}=<tu-token>`)}`);
+  }
+}
+
 function printEngramManualInstructions(agent) {
   const plat = process.platform;
   info("Para activar memoria buscable/acumulativa (modo " + c.bold("hybrid") + "):");
-  if (plat === "darwin" || plat === "linux") {
+  if (plat === "linux") {
+    info("  1. Binario precompilado " + c.dim("(recomendado)") + ": baja " + c.bold("engram_<ver>_linux_<amd64|arm64>.tar.gz") + " de");
+    info("     " + c.cyan("https://github.com/Gentleman-Programming/engram/releases"));
+    info("     " + c.bold("tar -xzf engram_*_linux_*.tar.gz && mv engram ~/.local/bin/ && chmod +x ~/.local/bin/engram"));
+    info("     " + c.dim('(asegúrate que ~/.local/bin esté en tu PATH: export PATH="$HOME/.local/bin:$PATH")'));
+    info("     " + c.dim("o, con Go 1.24+: ") + c.bold("go install github.com/Gentleman-Programming/engram/cmd/engram@latest"));
+  } else if (plat === "darwin") {
     info("  1. " + c.bold("brew install gentleman-programming/tap/engram") + "  " + c.dim("(o binario: github.com/Gentleman-Programming/engram/releases)"));
   } else if (plat === "win32") {
     info("  1. " + c.bold("go install github.com/Gentleman-Programming/engram/cmd/engram@latest") + "  " + c.dim("(requiere Go 1.24+)"));
@@ -455,9 +769,15 @@ export function doctor(cwd) {
   const jarvis = detectJarvis(cwd);
   // jarvis es opt-in (--no-jarvis): informativo, no cuenta como fallo.
   add("ozali-jarvis", true, jarvis.present ? `configurado (${jarvis.where.join(", ")})` : "no configurado (--no-jarvis)");
-  const cloudOn = !!(cfg && cfg.cloud && cfg.cloud.enabled);
+  const cloudMeta = readTeamCloud(cwd);
+  const cloudOn = !!(cfg && cfg.cloud && cfg.cloud.enabled) || !!(cloudMeta && cloudMeta.enrolled);
   // Cloud es opt-in: "off" es un estado válido (no cuenta como fallo).
-  add("Engram Cloud", true, cloudOn ? `enrolado → ${cfg.cloud.server || "server por defecto"}` : "off (opt-in, git-sync activo)");
+  const cloudDetail = cloudOn
+    ? [`enrolado → ${firstNonEmpty(cloudMeta && cloudMeta.server, cfg && cfg.cloud && cfg.cloud.server) || "server por defecto"}`,
+       hasCloudToken() ? c.green("token ✓") : c.yellow("sin token"),
+       cloudMeta && cloudMeta.dashboard ? c.cyan(cloudMeta.dashboard) : ""].filter(Boolean).join(" · ")
+    : "off (opt-in, git-sync activo)";
+  add("Engram Cloud", true, cloudDetail);
   add("Repo de conocimiento", !!(cfg && cfg.knowledgeRepo && exists(cfg.knowledgeRepo)), cfg ? cfg.knowledgeRepo : "sin configurar (ozali init)");
 
   // Strict TDD (de la fuente de verdad)
@@ -492,6 +812,42 @@ export function doctor(cwd) {
       step("Estado de sync (Engram)");
       for (const line of status.split(/\r?\n/)) console.log("  " + c.dim(line));
     }
+  }
+
+  // Estado detallado de Engram Cloud (si está habilitado).
+  if (cloudOn && env.engram.available) {
+    const project = (cfg && cfg.project) || projectName(cwd);
+    const snap = cloudStatusSnapshot(cwd, project);
+    const hasData = snap.syncStatus || snap.upgradeStatus || snap.conflictsStats;
+    if (hasData) {
+      step("Estado de Engram Cloud");
+      if (snap.syncStatus) {
+        info("Sync:");
+        printIndented(snap.syncStatus);
+        // Warnings específicos por reason_code
+        const reason = extractReasonCode(snap.syncStatus);
+        if (reason === "blocked_unenrolled") warn("El proyecto no está enrolado en el servidor cloud. Corre " + c.bold("ozali init") + " para re-enrolarlo.");
+        if (reason === "transport_failed") warn("No se pudo conectar al servidor cloud (transport_failed). Verifica la URL y tu conexión.");
+      }
+      if (snap.upgradeStatus) {
+        info("Upgrade:");
+        printIndented(snap.upgradeStatus);
+        // Fase 3.2: sugerir upgrade si el estado no es bootstrap_verified
+        const upgradeReason = extractReasonCode(snap.upgradeStatus);
+        if (upgradeReason && upgradeReason !== "bootstrap_verified") {
+          warn(`El proyecto requiere upgrade de cloud (estado: ${upgradeReason}). Corre ${c.bold("ozali cloud upgrade")}.`);
+        }
+      }
+      if (snap.conflictsStats) {
+        info("Conflictos:");
+        printIndented(snap.conflictsStats);
+        // Fase 4.2: advertir conflictos pendientes
+        const pendingMatch = snap.conflictsStats.match(/pending\s*[:=]\s*(\d+)/i);
+        const pending = pendingMatch ? parseInt(pendingMatch[1], 10) : 0;
+        if (pending > 0) warn(`${pending} conflicto(s) de memoria sin juzgar. Usa ${c.bold("ozali audit --conflicts")}.`);
+      }
+    }
+    if (cloudMeta && cloudMeta.dashboard) info(`Dashboard: ${c.cyan(cloudMeta.dashboard)}`);
   }
 
   // Tendencia de uso de tokens (la escribe cdk en cada hito; informativo).
@@ -564,7 +920,7 @@ export function update(cwd, opts = {}) {
   // 3) ozali-jarvis: crea el orquestador en repos previos a 0.4.0 y refresca el resto.
   if (!opts.noJarvis) {
     const proj = projectName(cwd);
-    const engPath = path.join(cwd, ".engram", "config.json");
+    const engPath = ENGRAM_CONFIG_PATH(cwd);
     if (!exists(engPath)) { writeJSON(engPath, { project_name: proj }); ok(`Proyecto de memoria fijado en ${c.bold(".engram/config.json")} (${proj}).`); }
     if (agent === "claude-code" || agent === "both") ensureJarvisClaudeCode(cwd);
     if (agent === "opencode" || agent === "both") ensureJarvisOpencode(cwd);
@@ -596,7 +952,7 @@ function detectCdk(cwd) {
 
 // ============================================================= sync ===========
 export function sync(cwd, opts) {
-  step(`ozali sync${opts.import ? " --import" : ""} — histórico ↔ repo de conocimiento`);
+  step(`ozali sync${opts.import ? " --import" : ""}${opts.cloud ? " --cloud" : ""} — histórico ↔ repo de conocimiento`);
   const cfg = readJSON(CONFIG_PATH(cwd));
   if (!cfg || !cfg.knowledgeRepo) { warn("Sin repo de conocimiento configurado. Corre " + c.bold("ozali init") + "."); return 1; }
   const kRepo = cfg.knowledgeRepo;
@@ -608,11 +964,48 @@ export function sync(cwd, opts) {
 
   // Engram Cloud (opt-in): réplica bidireccional adicional al git-sync.
   if (opts.cloud) {
-    if (cfg.cloud && cfg.cloud.enabled && tryExec("engram", ["--version"])) {
-      info(`Replicando con Engram Cloud (proyecto "${project}")…`);
-      if (spawnCmd("engram", ["sync", "--cloud", "--project", project], { cwd }) === 0) ok("Réplica con Engram Cloud completada.");
-      else warn("engram sync --cloud no terminó correctamente. Revisa el output de arriba.");
-    } else if (!(cfg.cloud && cfg.cloud.enabled)) {
+    const cloudMeta = readTeamCloud(cwd);
+    const cloudEnabled = (cfg.cloud && cfg.cloud.enabled) || (cloudMeta && cloudMeta.enrolled);
+    if (cloudEnabled && tryExec("engram", ["--version"])) {
+      if (!hasCloudToken() && cloudMeta && cloudMeta.auth_required !== false) {
+        warn(`El servidor cloud puede requerir autenticación. Define ${c.bold(CLOUD_TOKEN_ENV)} si falla el sync.`);
+      }
+      const cloudServer = firstNonEmpty(cloudMeta && cloudMeta.server, cfg.cloud && cfg.cloud.server);
+      if (cloudServer && process.env[CLOUD_SERVER_ENV] === undefined) process.env[CLOUD_SERVER_ENV] = cloudServer;
+
+      if (opts.import) {
+        // --- onboarding inverso: pull desde cloud ---
+        info(`Recibiendo memoria del equipo desde Engram Cloud (proyecto "${project}")…`);
+        const pullOut = tryExec("engram", ["sync", "--cloud", "--import", "--project", project], { cwd });
+        if (pullOut !== null) {
+          ok("Pull desde Engram Cloud completado.");
+          if (pullOut.trim()) printIndented(pullOut);
+          // Importar los chunks locales que llegaron vía cloud
+          if (spawnCmd("engram", ["sync", "--import"], { cwd }) === 0) ok("Memorias cloud importadas a Engram local.");
+          else warn("engram sync --import no terminó correctamente tras el pull cloud.");
+          // Verificación
+          const verify = tryExec("engram", ["cloud", "status", "--project", project], { cwd });
+          if (verify) { info("Estado de cloud:"); printIndented(verify); }
+        } else {
+          const reason = extractReasonCode(pullOut);
+          warn(`engram sync --cloud --import no terminó correctamente${reason ? ` (motivo: ${reason})` : ""}.`);
+          if (reason === "blocked_unenrolled") info("El proyecto no está enrolado en el servidor. Corre " + c.bold("ozali init") + " para enrolarlo.");
+        }
+      } else {
+        // --- push a cloud (default) ---
+        info(`Replicando con Engram Cloud (proyecto "${project}")…`);
+        const out = syncCloudProject(cwd, project);
+        if (out !== null) {
+          ok("Réplica con Engram Cloud completada.");
+          if (out.trim()) printIndented(out);
+        } else {
+          const reason = extractReasonCode(out);
+          warn(`engram sync --cloud no terminó correctamente${reason ? ` (motivo: ${reason})` : ""}. Revisa el output de arriba.`);
+          if (reason === "blocked_unenrolled") info("El proyecto no está enrolado en el servidor. Corre " + c.bold("ozali init") + " para enrolarlo.");
+          if (reason === "transport_failed") info("No se pudo conectar al servidor cloud. Verifica la URL y tu conexión.");
+        }
+      }
+    } else if (!cloudEnabled) {
       warn("--cloud pedido, pero Engram Cloud no está habilitado. Corre " + c.bold("ozali init") + " para habilitarlo, o usa git-sync sin --cloud.");
     } else {
       warn("--cloud pedido, pero Engram no responde. Omito la réplica cloud.");
@@ -692,7 +1085,7 @@ export async function audit(cwd, opts) {
   step("ozali audit — auditoría de memoria (Engram)");
   const env = detectAll(cwd);
   const cfg = readJSON(CONFIG_PATH(cwd));
-  const engramCfg = readJSON(path.join(cwd, ".engram", "config.json"));
+  const engramCfg = readJSON(ENGRAM_CONFIG_PATH(cwd));
   const project = (engramCfg && engramCfg.project_name) || (cfg && cfg.project) || projectName(cwd);
   const hasProjectContext = env.git.isRepo || !!cfg || !!engramCfg;
 
@@ -710,6 +1103,34 @@ export async function audit(cwd, opts) {
   if (!env.engram.available) {
     warn("Engram no está instalado → auditoría desde documentos locales.");
     return auditFromDocs(cwd, project);
+  }
+
+  // Fase 4.1: --dashboard abre el dashboard de Engram Cloud
+  if (opts.dashboard) {
+    const cloudMeta = readTeamCloud(cwd);
+    const dash = (cloudMeta && cloudMeta.dashboard) || (cloudMeta && cloudMeta.server ? cloudDashboardURL(cloudMeta.server) : null);
+    if (!dash) { warn("No hay Engram Cloud configurado. Corre " + c.bold("ozali init") + " primero."); return 1; }
+    info(`Abriendo dashboard: ${c.cyan(dash)}`);
+    openURL(dash);
+    return 0;
+  }
+
+  // Fase 4.1: --conflicts lista/stats conflictos de memoria
+  if (opts.conflicts) {
+    const projArg = scope === "project" ? ["--project", project] : [];
+    if (opts.stats) {
+      step(`Estadísticas de conflictos${scope === "project" ? ` — ${project}` : ""}`);
+      const out = tryExec("engram", ["conflicts", "stats", ...projArg], { cwd });
+      if (out) printIndented(out);
+      else warn("No se pudieron obtener estadísticas de conflictos.");
+    } else {
+      const statusFlag = opts.judged ? ["--status", "judged"] : [];
+      step(`Conflictos${opts.judged ? " juzgados" : " pendientes"}${scope === "project" ? ` — ${project}` : ""}`);
+      const out = tryExec("engram", ["conflicts", "list", ...statusFlag, ...projArg], { cwd });
+      if (out) printIndented(out);
+      else warn("No se pudieron listar conflictos.");
+    }
+    return 0;
   }
 
   // Navegador interactivo.
@@ -756,4 +1177,101 @@ function auditFromDocs(cwd, project) {
   }
   info("Instala Engram para auditoría buscable/acumulativa (" + c.bold("ozali doctor") + ").");
   return 0;
+}
+
+// ============================================================= cloud ===========
+export async function cloud(cwd, opts) {
+  const sub = opts._[1] || "status";
+  const cfg = readJSON(CONFIG_PATH(cwd));
+  const cloudMeta = readTeamCloud(cwd);
+  const project = (cfg && cfg.project) || projectName(cwd);
+  const cloudServer = firstNonEmpty(cloudMeta && cloudMeta.server, cfg && cfg.cloud && cfg.cloud.server);
+
+  switch (sub) {
+    case "status": {
+      step(`ozali cloud status — proyecto "${project}"`);
+      if (!tryExec("engram", ["--version"])) { warn("Engram no responde."); return 1; }
+      if (cloudServer && process.env[CLOUD_SERVER_ENV] === undefined) process.env[CLOUD_SERVER_ENV] = cloudServer;
+      const status = tryExec("engram", ["cloud", "status", "--project", project], { cwd });
+      if (status) { info("Estado:"); printIndented(status); }
+      else { warn("No se pudo obtener el estado de cloud."); }
+      const upgrade = tryExec("engram", ["cloud", "upgrade", "status", "--project", project], { cwd });
+      if (upgrade) { info("Upgrade:"); printIndented(upgrade); }
+      return 0;
+    }
+
+    case "upgrade": {
+      step(`ozali cloud upgrade — proyecto "${project}"`);
+      if (!tryExec("engram", ["--version"])) { warn("Engram no responde."); return 1; }
+      if (cloudServer && process.env[CLOUD_SERVER_ENV] === undefined) process.env[CLOUD_SERVER_ENV] = cloudServer;
+      // 1) doctor (checkpoint)
+      info("Paso 1/3: Verificando estado actual…");
+      const status = tryExec("engram", ["cloud", "status", "--project", project], { cwd });
+      if (status) printIndented(status);
+      // 2) repair --dry-run
+      info("Paso 2/3: Simulando repair (dry-run)…");
+      const dryRun = tryExec("engram", ["cloud", "upgrade", "repair", "--dry-run", "--project", project], { cwd });
+      if (dryRun) printIndented(dryRun);
+      const doApply = await confirm("¿Aplicar el repair ahora?", true);
+      if (!doApply) { info("Upgrade cancelado. Puedes aplicarlo después con " + c.bold("ozali cloud repair") + "."); return 0; }
+      // 3) repair --apply + bootstrap
+      info("Paso 3/3: Aplicando repair…");
+      const repairOut = tryExec("engram", ["cloud", "upgrade", "repair", "--apply", "--project", project], { cwd });
+      if (repairOut !== null) { ok("Repair aplicado."); if (repairOut.trim()) printIndented(repairOut); }
+      else { warn("Repair falló. Revisa el output de arriba."); return 1; }
+      const boot = tryExec("engram", ["cloud", "upgrade", "bootstrap", "--project", project], { cwd });
+      if (boot !== null) { ok("Bootstrap completado."); if (boot.trim()) printIndented(boot); }
+      else warn("Bootstrap falló. Corre " + c.bold("ozali cloud status") + " para ver el estado.");
+      return 0;
+    }
+
+    case "repair": {
+      step(`ozali cloud repair — proyecto "${project}"`);
+      if (!tryExec("engram", ["--version"])) { warn("Engram no responde."); return 1; }
+      if (cloudServer && process.env[CLOUD_SERVER_ENV] === undefined) process.env[CLOUD_SERVER_ENV] = cloudServer;
+      const out = tryExec("engram", ["cloud", "upgrade", "repair", "--apply", "--project", project], { cwd });
+      if (out !== null) { ok("Repair aplicado."); if (out.trim()) printIndented(out); return 0; }
+      warn("Repair falló. Revisa el output de arriba.");
+      return 1;
+    }
+
+    case "dashboard": {
+      const dash = cloudMeta && cloudMeta.dashboard ? cloudMeta.dashboard : (cloudServer ? cloudDashboardURL(cloudServer) : null);
+      if (!dash) { warn("No hay servidor cloud configurado. Corre " + c.bold("ozali init") + " primero."); return 1; }
+      info(`Abriendo dashboard: ${c.cyan(dash)}`);
+      openURL(dash);
+      return 0;
+    }
+
+    case "config": {
+      step("ozali cloud config");
+      if (cloudMeta && cloudMeta.enrolled) {
+        info(`Servidor: ${c.bold(cloudMeta.server || "no definido")}`);
+        info(`Proyecto: ${c.bold(cloudMeta.project || project)}`);
+        info(`Token: ${hasCloudToken() ? c.green("✓ configurado") : c.yellow("✗ no configurado")}`);
+        info(`Dashboard: ${cloudMeta.dashboard ? c.cyan(cloudMeta.dashboard) : "no disponible"}`);
+        info(`Autosync: ${c.bold(CLOUD_AUTOSYNC_ENV)}=${process.env[CLOUD_AUTOSYNC_ENV] || "no definido"}`);
+        const reconfig = await confirm("¿Reconfigurar el servidor?", false);
+        if (!reconfig) return 0;
+      }
+      const server = await ask("URL del servidor de Engram Cloud", cloudMeta && cloudMeta.server || "http://127.0.0.1:18080");
+      const token = await ask("Token de autenticación");
+      if (!token) { warn("Sin token no se puede configurar (modo autenticado obligatorio)."); return 1; }
+      spawnCmd("engram", ["cloud", "config", "--server", server]);
+      process.env[CLOUD_TOKEN_ENV] = token;
+      if (spawnCmd("engram", ["cloud", "enroll", project]) === 0) {
+        writeTeamCloud(cwd, { enabled: true, server, project, authRequired: true });
+        configureCloudAutosync(cwd, opts);
+        persistCloudToken(token, opts);
+        ok("Engram Cloud reconfigurado.");
+        return 0;
+      }
+      warn("No se pudo enrolar el proyecto. Verifica el servidor y el token.");
+      return 1;
+    }
+
+    default:
+      err(`Subcomando desconocido "${sub}". Usa: status | upgrade | repair | dashboard | config`);
+      return 1;
+  }
 }

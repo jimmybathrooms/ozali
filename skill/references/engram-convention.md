@@ -269,3 +269,81 @@ artefacto, menos cuesta recuperarlo después.
   agresivo con recall-first (resume antes, evita relecturas grandes).
 
 > `savedByRecall` = estimación de relectura evitada por reusar memoria (ver plantilla `06-uso-tokens`).
+
+---
+
+## 8. Cloud: réplica de equipo en tiempo real
+
+Engram Cloud es una **capa opt-in** que replica la memoria del equipo a un servidor central,
+**adicional al git-sync**. Con autosync activo, la réplica es **automática e invisible**: los devs
+no necesitan correr `ozali sync` manualmente para compartir memoria.
+
+### 8.1 Modelo: cloud-first, git-sync como backup
+
+```
+dev A guarda memoria → autosync → cloud → dev B (autosync recibe)
+                                ↕
+                    git-sync (backup/secondary)
+```
+
+- **Cloud-first**: la réplica es en tiempo real (autosync). El repo de conocimiento sigue siendo
+  el backup offline (ver [team-history](../../docs/team-history.md)).
+- **Sin cloud**: todo funciona igual, solo que el sync es manual (`ozali sync` + `--push`/`--import`).
+
+### 8.2 Cómo se comparten las memorias vía cloud
+
+1. Un dev guarda una observación con `mem_save` (scope: project, español — ver §1.5).
+2. El autosync la replica al servidor cloud automáticamente.
+3. El autosync del otro dev la recibe y la importa a su store local.
+4. Ambos devs pueden buscarla con `mem_search`.
+
+> **Scope + idioma siguen siendo obligatorios** (§1.5): `scope: project` siempre en español,
+> `scope: personal` cualquier idioma. Cloud no cambia esta regla — solo acelera el transporte.
+
+### 8.3 Archivos de configuración
+
+| Archivo | Commiteable | Contiene | Propósito |
+|---|---|---|---|
+| `.ozali/cloud.json` | **Sí** (no lleva secretos) | server, project, enrolled, dashboard URL | Que un dev nuevo detecte la cloud del equipo al hacer `ozali init` |
+| `~/.engram/cloud_token` | No (local) | El token de auth | Persistencia del token entre sesiones |
+| `.claude/settings.json` (env) | Sí | `ENGRAM_CLOUD_AUTOSYNC=1`, `ENGRAM_CLOUD_TOKEN` | Autosync en el MCP del agente |
+
+> El token **nunca** se commitea. `.ozali/cloud.json` solo tiene metadatos sin secretos.
+
+### 8.4 Comandos cloud del CLI
+
+| Comando | Qué hace |
+|---|---|
+| `ozali init` → detecta `.ozali/cloud.json` | Onboarding: conecta al dev nuevo en 1 paso (Fase 1) |
+| `ozali sync --cloud` | Push manual a cloud (además del git-sync) |
+| `ozali sync --cloud --import` | Pull desde cloud (onboarding inverso) |
+| `ozali cloud status` | Estado de enrollment + último sync + upgrade pipeline |
+| `ozali cloud upgrade` | Flujo completo: doctor → repair --apply → bootstrap |
+| `ozali cloud repair` | `engram cloud upgrade repair --apply` |
+| `ozali cloud dashboard` | Abre el dashboard web en el navegador |
+| `ozali cloud config` | Re-configura servidor/token |
+| `ozali audit --conflicts` | Lista conflictos de memoria pendientes |
+| `ozali audit --conflicts --stats` | Estadísticas de conflictos |
+
+### 8.5 Conflictos: qué son y cómo resolverlos
+
+Cuando dos devs guardan memorias que el sistema detecta como **potencialmente conflictivas**
+(misma `topic_key`, contenido divergente), Engram Cloud las marca como conflictos pendientes.
+
+- `ozali doctor` avisa si hay conflictos pendientes (`pending > 0`).
+- `ozali audit --conflicts` los lista.
+- El agente los resuelve con `mem_judge` (ver protocolo de conflict surfacing en las
+  instrucciones del MCP de Engram): `related`, `compatible`, `scoped`, `conflicts_with`,
+  `supersedes`, `not_conflict`.
+- `ozali audit --conflicts --judged` muestra los ya resueltos.
+
+### 8.6 Troubleshooting cloud
+
+| `reason_code` | Significado | Acción |
+|---|---|---|
+| `blocked_unenrolled` | El proyecto no está enrolado en el servidor | `ozali init` o `ozali cloud config` |
+| `transport_failed` | No se pudo conectar al servidor | Verifica URL, red, firewall |
+| `bootstrap_verified` (upgrade) | Todo OK, no necesita upgrade | — |
+| otro (upgrade) | El proyecto requiere upgrade de esquema | `ozali cloud upgrade` |
+
+> `ozali doctor` parsea estos códigos y muestra warnings específicos.

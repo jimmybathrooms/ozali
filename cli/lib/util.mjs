@@ -21,6 +21,21 @@ export function pkgVersion() {
   }
 }
 
+/**
+ * Nombre del asset de release de Engram para un SO/arch/versión dados.
+ * Convención oficial: engram_<version>_<os>_<arch>.<ext> (.tar.gz en linux/darwin, .zip en windows).
+ * Devuelve null si el SO o la arquitectura no están soportados. Función pura (sin red).
+ */
+export function engramAssetName(platform, arch, version) {
+  const osMap = { darwin: "darwin", linux: "linux", win32: "windows" };
+  const archMap = { x64: "amd64", arm64: "arm64" };
+  const os = osMap[platform];
+  const a = archMap[arch];
+  if (!os || !a) return null;
+  const ext = platform === "win32" ? "zip" : "tar.gz";
+  return `engram_${version}_${os}_${a}.${ext}`;
+}
+
 // ---- colores (sin deps; respeta NO_COLOR y no-TTY) --------------------------
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const wrap = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : String(s));
@@ -68,6 +83,14 @@ export function readJSON(p, fallback = null) {
 export function writeJSON(p, obj) {
   ensureDir(path.dirname(p));
   fs.writeFileSync(p, JSON.stringify(obj, null, 2) + "\n");
+}
+
+/** Abre una URL en el navegador por defecto. Devuelve true si pudo lanzar el comando. */
+export function openURL(url) {
+  if (!url) return false;
+  if (process.platform === "darwin") return spawnCmd("open", [url]) === 0;
+  if (process.platform === "win32") return spawnCmd("cmd", ["/c", "start", "", url]) === 0;
+  return spawnCmd("xdg-open", [url]) === 0;
 }
 
 // ---- ejecución de comandos (read-only / git) --------------------------------
