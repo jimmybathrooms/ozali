@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import {
   c, ok, warn, err, info, step,
-  SKILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
+  SKILL_SRC, COMMIT_SKILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, tryExec, spawnCmd, which, engramAssetName,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL,
 } from "./util.mjs";
@@ -21,6 +21,11 @@ const CLOUD_SERVER_ENV = "ENGRAM_CLOUD_SERVER";
 function skillTarget(cwd, scope) {
   const base = scope === "global" ? path.join(process.env.HOME || "", ".claude") : path.join(cwd, ".claude");
   return path.join(base, "skills", "ozali");
+}
+
+function commitSkillTarget(cwd, scope) {
+  const base = scope === "global" ? path.join(process.env.HOME || "", ".claude") : path.join(cwd, ".claude");
+  return path.join(base, "skills", "ozali-commit");
 }
 
 function readTeamCloud(cwd) {
@@ -166,11 +171,14 @@ export async function init(cwd, opts) {
 
   // --- acciones ---
   step("Aplicando");
-  // 1) copiar skill
+  // 1) copiar skill ozali (bootstrap) + ozali-commit (commit convencional)
   const target = skillTarget(cwd, scope);
   ensureDir(path.dirname(target));
   copyDir(SKILL_SRC, target);
   ok(`Skill instalada en ${c.bold(path.relative(cwd, target) || target)}.`);
+  const commitTarget = commitSkillTarget(cwd, scope);
+  copyDir(COMMIT_SKILL_SRC, commitTarget);
+  ok(`Skill ${c.bold("ozali-commit")} instalada en ${c.bold(path.relative(cwd, commitTarget) || commitTarget)}.`);
 
   // 2) perfiles base de permisos (idempotentes, merge mínimo) por agente
   if (agent === "claude-code" || agent === "both") {
@@ -761,6 +769,19 @@ export function doctor(cwd) {
   add("Node ≥ 16", env.node.ok, env.node.version);
   add("Fuente de verdad", env.sot.found, env.sot.found ? `${env.sot.doc} + ${env.sot.dir}/` : "ausente (corre la skill 'ozali')");
   add("Skill ozali instalada", env.skill.installed, env.skill.installed ? env.skill.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
+  // Skill cdk (la genera el agente): versión de contrato vs. la vigente del paquete.
+  const cdkInfo = detectCdk(cwd);
+  const cdkN = cdkCanonicalVersion();
+  if (!cdkInfo.installed) {
+    add("Skill cdk", true, "no generada aún (corre la skill 'ozali' en tu agente)");
+  } else if (cdkInfo.version != null && cdkInfo.version >= cdkN && !cdkInfo.hasCopsis) {
+    add("Skill cdk", true, `contrato v${cdkInfo.version} (al día)`);
+  } else {
+    const reason = cdkInfo.hasCopsis ? "contiene copsis-commit → migra con la skill 'ozali'"
+      : cdkInfo.version == null ? "sin versión de contrato (legado) → migra con la skill 'ozali'"
+      : `contrato v${cdkInfo.version} < v${cdkN} → migra con la skill 'ozali'`;
+    add("Skill cdk", false, reason);
+  }
   add("Engram", env.engram.available, env.engram.available ? env.engram.bin : "no instalado → modo docs");
   if (env.engram.available) {
     const online = tryExec("engram", ["doctor"], { cwd }) !== null;
@@ -899,10 +920,15 @@ export function update(cwd, opts = {}) {
   }
 
   // 1) Skill ozali (incluye las references: la base desde la que el agente regenera cdk)
+  //    + ozali-commit (commit convencional) como skill hermana — la crea en repos previos.
   if (env.skill.installed) {
     for (const p of env.skill.paths) {
       copyDir(SKILL_SRC, p);
       ok(`Skill ozali actualizada: ${path.relative(cwd, p) || p} → v${pkgVersion()}`);
+      const commitDir = path.join(path.dirname(p), "ozali-commit");
+      const freshCommit = !exists(commitDir);
+      copyDir(COMMIT_SKILL_SRC, commitDir);
+      ok(`Skill ozali-commit ${freshCommit ? "instalada" : "actualizada"}: ${path.relative(cwd, commitDir) || commitDir}`);
     }
   } else {
     warn("Skill ozali no instalada en esta ruta (corre " + c.bold("ozali init") + " para instalarla).");
@@ -926,13 +952,27 @@ export function update(cwd, opts = {}) {
     if (agent === "opencode" || agent === "both") ensureJarvisOpencode(cwd);
   }
 
-  // 4) Skill cdk: la genera el AGENTE (Fase 6), el CLI no la regenera.
+  // 4) Skill cdk: la genera/migra el AGENTE (Fase 0.5/6); el CLI solo detecta versión y guía.
   const cdk = detectCdk(cwd);
+  const cdkN = cdkCanonicalVersion();
   if (cdk.installed) {
     step("Skill cdk (generada por el agente)");
-    warn("cdk no se actualiza desde el CLI: la regenera tu agente con el contrato nuevo.");
-    info("Abre tu agente y vuelve a correr la skill " + c.bold("ozali") + " para regenerar cdk (ozali-jarvis, recall-first §7, telemetría).");
-    info("Tus docs por hito (" + c.bold(".ozali/docs/cdk/") + ") y el plan congelado se conservan.");
+    const upToDate = cdk.version != null && cdk.version >= cdkN && !cdk.hasCopsis;
+    if (upToDate) {
+      ok(`cdk al día (contrato v${cdk.version}).`);
+    } else {
+      const reason = cdk.version == null ? "sin versión de contrato (cdk legado)"
+        : cdk.version < cdkN ? `contrato v${cdk.version} < v${cdkN} (desactualizado)`
+        : "contiene referencias a copsis-commit";
+      warn(`cdk desactualizada: ${reason}.`);
+      if (cdk.hasCopsis) warn("Detectadas referencias a " + c.bold("copsis-commit") + " (heredadas de versiones anteriores).");
+      info("El CLI no regenera cdk. Actualízala manualmente desde tu agente:");
+      info("  1. Abre tu agente en este proyecto.");
+      info("  2. Corre la skill " + c.bold("ozali") + " (escribe " + c.bold('"ozali"') + "): el pre-flight migra cdk al contrato " + c.bold("v" + cdkN) + ", elimina copsis-commit y cablea ozali-commit.");
+      info("Tus docs por hito (" + c.bold(".ozali/docs/cdk/") + ") y el plan congelado se conservan.");
+    }
+  } else {
+    info("cdk aún no generada en este repo. Corre la skill " + c.bold("ozali") + " en tu agente para crearla.");
   }
 
   // 5) versión del config
@@ -941,13 +981,39 @@ export function update(cwd, opts = {}) {
   return 0;
 }
 
-/** ¿Existe la skill cdk (generada por el agente)? */
+/**
+ * ¿Existe la skill cdk (generada por el agente)? Devuelve además la versión de contrato
+ * estampada en su frontmatter (`cdk_contract_version`) y si aún referencia `copsis-commit`.
+ * version === null ⇒ cdk legado (sin marcador de versión).
+ */
 function detectCdk(cwd) {
   const paths = [
     path.join(cwd, ".claude", "skills", "cdk", "SKILL.md"),
     path.join(HOME, ".claude", "skills", "cdk", "SKILL.md"),
   ].filter(exists);
-  return { installed: paths.length > 0, paths };
+  if (paths.length === 0) return { installed: false, paths: [], version: null, hasCopsis: false };
+  let version = null;
+  let hasCopsis = false;
+  for (const f of paths) {
+    const txt = fs.readFileSync(f, "utf8");
+    if (version === null) {
+      const m = txt.match(/cdk_contract_version:\s*(\d+)/i);
+      if (m) version = parseInt(m[1], 10);
+    }
+    if (/copsis-commit/i.test(txt)) hasCopsis = true;
+  }
+  return { installed: true, paths, version, hasCopsis };
+}
+
+/** Versión de contrato vigente de cdk (fuente única: skill/references/cdk-contract.md del paquete). */
+function cdkCanonicalVersion() {
+  try {
+    const txt = fs.readFileSync(path.join(SKILL_SRC, "references", "cdk-contract.md"), "utf8");
+    const m = txt.match(/CDK_CONTRACT_VERSION:\s*(\d+)/i);
+    return m ? parseInt(m[1], 10) : 1;
+  } catch {
+    return 1;
+  }
 }
 
 // ============================================================= sync ===========

@@ -30,6 +30,7 @@ produce documentación, la calibración, el plan y los artefactos de la skill `c
 
 ```
 Fase 0    Identidad y registro          → quién corre ozali (git/sesión)
+Fase 0.5  Pre-flight de cdk             → ¿existe cdk? ¿versión de contrato vigente? migrar si toca
 Fase 1    Detección fuente de verdad    → ¿existe AI.md/.ai o IA.md/.ia?
 Fase 2    Generación conocimiento       → si falta, evaluar el proyecto y generar AI.md + .ai/
 Fase 3    Validación + ajustes          → ¿coincide con la estructura real? ajustes mínimos
@@ -66,6 +67,45 @@ Fecha/Hora: <yyyy-mm-dd HH:MM:SS> (zona local)
 ```
 
 Guarda estos valores; se reutilizan en Fase 6 y en la documentación.
+
+---
+
+## Fase 0.5 — Pre-flight de `cdk` (versión de contrato + migración)
+
+> Esta fase resuelve el caso de **un repo que ya tiene `cdk` instalada**: en vez de omitirla,
+> `ozali` decide si está **al día**, **desactualizada** o **ausente**, y actúa en consecuencia.
+> La **versión de contrato vigente** y las reglas de migración están en
+> [`references/cdk-contract.md`](references/cdk-contract.md) — es la **fuente de verdad única**.
+
+1. **Lee la versión de contrato vigente `N`** del marcador `CDK_CONTRACT_VERSION` en
+   [`references/cdk-contract.md`](references/cdk-contract.md).
+2. **Busca el `cdk` instalado**: `.claude/skills/cdk/SKILL.md` (proyecto), luego
+   `~/.claude/skills/cdk/SKILL.md` (global). Si existe, lee `cdk_contract_version` de su frontmatter.
+3. **Decide y registra** la decisión (se usa en las Fases 5 y 6):
+
+   | Estado del `cdk` instalado | Decisión |
+   |---|---|
+   | **No existe** | `GENERAR` — flujo normal: continúa el bootstrap hasta el GATE (Fase 5) y genera `cdk` en la Fase 6, estampando `cdk_contract_version: N`. |
+   | **Existe sin `cdk_contract_version`** (cdk legado) o con valor **`< N`** | `MIGRAR` — **migración automática** (sin GATE), ver abajo. |
+   | **Existe con `cdk_contract_version == N`** | `AL_DÍA` — no regenerar. Infórmalo y continúa el bootstrap solo para refrescar la calibración/documentación si el usuario lo pide. |
+
+4. **Migración automática (`MIGRAR`)** — aplica los deltas del changelog de
+   [`references/cdk-contract.md`](references/cdk-contract.md) sobre el `cdk` instalado, **sin** pasar
+   por el GATE, porque preserva el `cdk` del usuario y solo actualiza el contrato:
+   - **Elimina toda referencia a `copsis-commit`** y reemplázala por **`ozali-commit`** (la skill de
+     commit vigente, instalada en `.claude/skills/ozali-commit/`).
+   - Aplica el resto de deltas del changelog (recall-first, telemetría, etc. según la versión).
+   - **Estampa** `cdk_contract_version: N` en el frontmatter del `cdk`.
+   - **Preserva** intactos `.ozali/docs/cdk/` (histórico por hito) y los planes congelados
+     (`02-plan-aprobado.md`).
+   - **Reporta** al usuario, en texto, qué cambió (referencias migradas, secciones actualizadas,
+     versión nueva).
+   - **Excepción → GATE:** si un delta exige **regeneración estructural** (reescribir subagentes,
+     cambiar el harness, rehacer el wiring de TDD), eso **no** es migración automática: preséntalo en
+     el plan del GATE (Fase 5) y regénéralo en la Fase 6.
+
+> Sin `cdk` previo, esta fase no hace nada salvo registrar `GENERAR`. La calibración (Fase 3.5) y el
+> resto del flujo continúan igual.
 
 ---
 
@@ -217,6 +257,9 @@ Solo tras la aprobación de la Fase 5. Genera:
    - declarar en el frontmatter una **description con triggers ricos** (verbos y sustantivos
      que el usuario usaría: "crea", "genera", "corrige", "refactoriza", método, clase,
      endpoint, componente…) para mejorar la auto-invocación de la skill;
+   - **estampar en el frontmatter** `cdk_contract_version: N`, con `N` = la versión de contrato
+     vigente de [`references/cdk-contract.md`](references/cdk-contract.md). Esto permite que el
+     pre-flight (Fase 0.5) y `ozali doctor`/`ozali update` sepan si el `cdk` está al día;
    - declarar que ayuda a **generar código** (nuevo componente, fix de bug, análisis de impacto)
      respetando la fuente de verdad y los estándares del proyecto;
    - orquestar los 8 subagentes según la fase del trabajo;
@@ -249,9 +292,11 @@ Solo tras la aprobación de la Fase 5. Genera:
      resumen técnico, `state`) con naming determinista, según
      [`references/engram-convention.md`](references/engram-convention.md), y al **iniciar** un
      hito hacer `mem_search` del proyecto/hito para recuperar contexto previo;
-   - en el **cierre del hito**, invocar la skill **`ozali-commit`** para generar el commit
-     summary (feature→`feat`, bugfix→`fix`, hotfix→`hotfix`, refactor→`refactor`; scope = módulo
-     del hito). El GATE del mensaje es independiente del GATE del plan.
+   - en el **cierre del hito**, invocar la skill **`ozali-commit`** (instalada por el CLI en
+     `.claude/skills/ozali-commit/`; **nunca** `copsis-commit`, nombre heredado de versiones
+     anteriores) para generar el commit summary (feature→`feat`, bugfix→`fix`, hotfix→`hotfix`,
+     refactor→`refactor`; scope = módulo del hito). El GATE del mensaje es independiente del GATE
+     del plan.
 2. `.claude/agents/<rol>.md` — un subagente real por cada uno de los 8 roles, con su system
    prompt y herramientas, según [`references/agents-blueprint.md`](references/agents-blueprint.md).
 3. `.claude/skills/cdk/verify-structure.mjs` — **harness del analista**: script Node sin

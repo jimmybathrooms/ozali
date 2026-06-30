@@ -133,6 +133,80 @@ test("update agrega ozali-jarvis en un repo que no lo tenía", () => {
   }
 });
 
+function initRepo(dir) {
+  run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+}
+
+function writeCdkStub(dir, body) {
+  const f = path.join(dir, ".claude", "skills", "cdk", "SKILL.md");
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, body);
+  return f;
+}
+
+test("init instala la skill ozali-commit", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "ozali-commit", "SKILL.md")), "ozali-commit SKILL.md instalada");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 1\n---\n# cdk\n");
+    const { stdout } = run(["doctor"], dir, true);
+    assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
+    assert.match(stdout, /contrato v1 \(al día\)/, "doctor marca cdk al día");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor marca cdk desactualizada si referencia copsis-commit", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 1\n---\n# cdk\ninvoca copsis-commit al cierre del hito\n");
+    const { stdout } = run(["doctor"], dir, true);
+    assert.match(stdout, /copsis-commit/, "doctor avisa de copsis-commit");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("update avisa y da pasos manuales si cdk está desactualizada (legado)", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    writeCdkStub(dir, "---\nname: cdk\n---\n# cdk legado que invoca copsis-commit\n");
+    const { stdout } = run(["update"], dir);
+    assert.match(stdout, /cdk desactualizada/, "update avisa de cdk desactualizada");
+    assert.match(stdout, /copsis-commit/, "update menciona la migración de copsis-commit");
+    assert.match(stdout, /skill ozali|pre-flight|migra/i, "update da pasos manuales");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("update también instala ozali-commit en repos previos", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    // Simula instalación previa sin ozali-commit.
+    fs.rmSync(path.join(dir, ".claude", "skills", "ozali-commit"), { recursive: true, force: true });
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "ozali-commit", "SKILL.md")), "precondición: sin ozali-commit");
+    run(["update"], dir);
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "ozali-commit", "SKILL.md")), "update instala ozali-commit");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("init --dry-run no escribe nada", () => {
   const dir = tmpProject();
   try {

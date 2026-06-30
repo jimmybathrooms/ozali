@@ -59,9 +59,9 @@ git clone <repo> && node ozali/cli/bin/ozali.mjs init
 ### Uso del CLI
 
 ```bash
-ozali init      # detecta agente, instala la skill, aísla el histórico, instala+configura Engram
-ozali doctor    # health-check read-only (fuente de verdad, Engram, Cloud, Strict TDD, runner…)
-ozali update    # actualiza la instalación (skill ozali + ozali-jarvis + permisos) al paquete
+ozali init      # detecta agente, instala skills ozali + ozali-commit, aísla histórico, configura Engram
+ozali doctor    # health-check read-only (fuente de verdad, Engram, Cloud, versión de cdk, Strict TDD…)
+ozali update    # actualiza skills ozali + ozali-commit + ozali-jarvis + permisos; avisa si cdk quedó atrás
 ozali sync      # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
 ozali audit     # navega/audita la memoria de Engram del proyecto (o general)
 ```
@@ -78,10 +78,17 @@ pnpm add -g ozali@<versión>   # actualiza el CLI global (pinea la versión por 
 ozali update                  # en cada repo: refresca skill ozali + ozali-jarvis + permisos
 ```
 
-`ozali update` también **crea ozali-jarvis** en repos inicializados con versiones anteriores. La skill
-`cdk` la **regenera tu agente** (no el CLI): tras `ozali update`, abre el agente y vuelve a correr la
-skill `ozali` para regenerar `cdk` con el contrato nuevo — tus docs por hito y el plan congelado se
-conservan.
+`ozali update` también **crea ozali-jarvis** y **instala la skill `ozali-commit`** en repos
+inicializados con versiones anteriores. La skill `cdk` la **regenera/migra tu agente** (no el CLI):
+`ozali update` **detecta la versión de contrato** de `cdk` y, si quedó atrás (o aún referencia
+`copsis-commit` de versiones viejas), te avisa y te da los pasos manuales. Tras `ozali update`, abre
+el agente y vuelve a correr la skill `ozali`: su **pre-flight** detecta el `cdk` existente, lo **migra
+automáticamente** al contrato vigente (eliminando `copsis-commit` y cableando `ozali-commit`) y
+estampa la versión — tus docs por hito y el plan congelado se conservan.
+
+> **Commit del hito (`ozali-commit`):** `init`/`update` instalan la skill `ozali-commit`
+> (`.claude/skills/ozali-commit/`), sucesora de `copsis-commit`. `cdk` la invoca al cerrar cada hito
+> para generar el commit convencional (feat/fix/hotfix/refactor + scope) tras tu aprobación.
 
 `init` también escribe un **perfil base de permisos** (`.claude/settings.json` para Claude Code,
 `opencode.json` para opencode) para reducir confirmaciones: deja libres comandos seguros y bloquea
@@ -125,6 +132,7 @@ Claude Code y opencode (perfiles de permisos para ambos en
 | Desplegar Engram Cloud (Google Cloud) | [docs/deploy-cloud-gcloud.md](docs/deploy-cloud-gcloud.md) |
 | Skill bootstrap | [skill/SKILL.md](skill/SKILL.md) |
 | Calibración de testing + TDD | [skill/references/calibration-blueprint.md](skill/references/calibration-blueprint.md) |
+| Contrato y versión de `cdk` | [skill/references/cdk-contract.md](skill/references/cdk-contract.md) |
 | Blueprint de agentes | [skill/references/agents-blueprint.md](skill/references/agents-blueprint.md) |
 | Memoria híbrida (docs + Engram) | [skill/references/engram-convention.md](skill/references/engram-convention.md) |
 

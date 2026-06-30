@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PKG_ROOT = path.resolve(HERE, "..", "..");
 export const SKILL_SRC = path.join(PKG_ROOT, "skill");
+export const COMMIT_SKILL_SRC = path.join(PKG_ROOT, "skill-commit");
 export const TEMPLATES_SRC = path.join(PKG_ROOT, "templates");
 
 export function pkgVersion() {

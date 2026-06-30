@@ -12,10 +12,11 @@ ${c.bold("Uso:")}
   ozali <comando> [opciones]
 
 ${c.bold("Comandos:")}
-  init      Detecta el agente (Claude Code/opencode), instala la skill ozali,
-            aísla el histórico, configura Engram y el repo de conocimiento.
-  doctor    Health-check read-only del proyecto (fuente de verdad, Engram, TDD…).
-  update    Actualiza la instalación (skill ozali + ozali-jarvis + permisos) al paquete.
+  init      Detecta el agente (Claude Code/opencode), instala las skills ozali y
+            ozali-commit, aísla el histórico, configura Engram y el repo de conocimiento.
+  doctor    Health-check read-only del proyecto (fuente de verdad, Engram, versión de cdk, TDD…).
+  update    Actualiza la instalación (skills ozali + ozali-commit + ozali-jarvis + permisos)
+            al paquete y avisa si la skill cdk quedó desactualizada.
   sync      Sincroniza el histórico (docs + Engram) con el repo de conocimiento.
   audit     Navega/audita la memoria de Engram del proyecto (o general).
   cloud     Gestiona Engram Cloud: status, upgrade, repair, dashboard, config.
