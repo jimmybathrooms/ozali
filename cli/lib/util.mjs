@@ -37,6 +37,29 @@ export function engramAssetName(platform, arch, version) {
   return `engram_${version}_${os}_${a}.${ext}`;
 }
 
+/**
+ * Elige el binario precompilado de Engram para un SO/arch dado a partir de la lista de
+ * releases (formato de la API de GitHub `/releases`). Se queda con el release ESTABLE
+ * más reciente cuyo tag sea semver `vX.Y.Z` y que **realmente contenga** el asset
+ * esperado, y devuelve su `browser_download_url` real. Ignora tags no-semver (p. ej.
+ * `pi-v*`, builds de Raspberry Pi que NO traen binarios) y draft/prerelease.
+ * Función pura (sin red). Devuelve { version, url } o null.
+ */
+export function pickEngramAsset(releases, platform, arch) {
+  if (!Array.isArray(releases)) return null;
+  for (const r of releases) {
+    if (!r || r.draft || r.prerelease) continue;
+    const m = /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name || "");
+    if (!m) continue; // salta tags no-semver (pi-v*, etc.)
+    const version = m[1];
+    const name = engramAssetName(platform, arch, version);
+    if (!name) return null; // SO/arch sin binario publicado
+    const asset = Array.isArray(r.assets) ? r.assets.find((a) => a && a.name === name) : null;
+    if (asset && asset.browser_download_url) return { version, url: asset.browser_download_url };
+  }
+  return null;
+}
+
 // ---- colores (sin deps; respeta NO_COLOR y no-TTY) --------------------------
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const wrap = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : String(s));

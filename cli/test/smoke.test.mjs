@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { engramAssetName } from "../lib/util.mjs";
+import { engramAssetName, pickEngramAsset } from "../lib/util.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.resolve(HERE, "..", "bin", "ozali.mjs");
@@ -334,4 +334,32 @@ test("engramAssetName respeta la convención de release por SO/arch", () => {
   assert.equal(engramAssetName("win32", "x64", "1.17.0"), "engram_1.17.0_windows_amd64.zip");
   assert.equal(engramAssetName("linux", "ia32", "1.17.0"), null, "arch no soportada → null");
   assert.equal(engramAssetName("freebsd", "x64", "1.17.0"), null, "SO no soportado → null");
+});
+
+test("pickEngramAsset ignora tags no-semver sin binarios (pi-v*) y draft/prerelease", () => {
+  // Shape real de la API de GitHub: el 'latest' es pi-v0.1.9 (0 assets); los binarios
+  // viven en tags vX.Y.Z. Además metemos un prerelease más nuevo que debe saltarse.
+  const releases = [
+    { tag_name: "pi-v0.1.9", prerelease: false, draft: false, assets: [] },
+    { tag_name: "v2.0.0", prerelease: true, draft: false, assets: [
+      { name: "engram_2.0.0_linux_amd64.tar.gz", browser_download_url: "https://x/pre" },
+    ] },
+    { tag_name: "v1.17.0", prerelease: false, draft: false, assets: [
+      { name: "checksums.txt", browser_download_url: "https://x/sum" },
+      { name: "engram_1.17.0_linux_amd64.tar.gz", browser_download_url: "https://x/engram_1.17.0_linux_amd64.tar.gz" },
+      { name: "engram_1.17.0_darwin_arm64.tar.gz", browser_download_url: "https://x/darwin" },
+    ] },
+  ];
+  // Linux x64 → salta pi-v* (sin assets) y el prerelease → v1.17.0, con la URL REAL del asset.
+  assert.deepEqual(pickEngramAsset(releases, "linux", "x64"), {
+    version: "1.17.0",
+    url: "https://x/engram_1.17.0_linux_amd64.tar.gz",
+  });
+  // macOS arm64 → mismo release, su asset darwin_arm64.
+  assert.deepEqual(pickEngramAsset(releases, "darwin", "arm64"), { version: "1.17.0", url: "https://x/darwin" });
+  // Arch sin binario → null.
+  assert.equal(pickEngramAsset(releases, "linux", "ia32"), null);
+  // Sin releases utilizables → null.
+  assert.equal(pickEngramAsset([{ tag_name: "pi-v0.1.9", assets: [] }], "linux", "x64"), null);
+  assert.equal(pickEngramAsset(null, "linux", "x64"), null);
 });

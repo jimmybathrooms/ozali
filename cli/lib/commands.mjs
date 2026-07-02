@@ -5,7 +5,7 @@ import os from "node:os";
 import {
   c, ok, warn, err, info, step,
   SKILL_SRC, COMMIT_SKILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
-  ensureGitignore, tryExec, spawnCmd, which, engramAssetName,
+  ensureGitignore, tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
 } from "./util.mjs";
 import { detectAll, detectWorkspace, detectReferences } from "./detect.mjs";
@@ -305,19 +305,28 @@ function installEngram() {
   return false;
 }
 
-const ENGRAM_RELEASES_API = "https://api.github.com/repos/Gentleman-Programming/engram/releases/latest";
-const ENGRAM_RELEASES_DL = "https://github.com/Gentleman-Programming/engram/releases/download";
+// Lista de releases (NO /releases/latest: ese endpoint puede devolver un tag especial
+// sin binarios, p. ej. `pi-v*`). Recorremos la lista y elegimos el release estable.
+const ENGRAM_RELEASES_LIST = "https://api.github.com/repos/Gentleman-Programming/engram/releases?per_page=30";
 
-/** Última versión publicada de Engram (sin la "v" inicial), o null si no hay red. */
-function latestEngramVersion() {
-  let raw = null;
-  if (which("curl")) raw = tryExec("curl", ["-fsSL", ENGRAM_RELEASES_API]);
-  else if (which("wget")) raw = tryExec("wget", ["-qO-", ENGRAM_RELEASES_API]);
+/** GET de texto con curl (o wget). Devuelve el body o null si no hay red/herramienta. */
+function fetchText(url) {
+  if (which("curl")) return tryExec("curl", ["-fsSL", url]);
+  if (which("wget")) return tryExec("wget", ["-qO-", url]);
+  return null;
+}
+
+/**
+ * Resuelve { version, url } del binario precompilado de Engram para este SO/arch,
+ * consultando la lista de releases y quedándose con el release estable más reciente
+ * que contenga el asset. Devuelve null si no hay red/herramienta o no hay binario.
+ */
+function resolveEngramAsset(platform, arch) {
+  const raw = fetchText(ENGRAM_RELEASES_LIST);
   if (!raw) return null;
-  try {
-    const tag = JSON.parse(raw).tag_name;
-    return tag ? String(tag).replace(/^v/, "") : null;
-  } catch { return null; }
+  let releases;
+  try { releases = JSON.parse(raw); } catch { return null; }
+  return pickEngramAsset(releases, platform, arch);
 }
 
 /** Descarga url → dest con curl (o wget como fallback). Devuelve true si tuvo éxito. */
@@ -359,14 +368,13 @@ function installEngramFromTarball() {
     return false;
   }
 
-  const version = latestEngramVersion();
-  if (!version) {
-    warn("No pude resolver la última versión de Engram (¿sin red o sin curl/wget?).");
+  const resolved = resolveEngramAsset(plat, process.arch);
+  if (!resolved) {
+    warn("No pude resolver un binario precompilado de Engram para tu SO/arch (¿sin red, sin curl/wget, o release sin assets?).");
     return false;
   }
-
+  const { version, url } = resolved;
   const asset = engramAssetName(plat, process.arch, version);
-  const url = `${ENGRAM_RELEASES_DL}/v${version}/${asset}`;
   info(`Descargando binario precompilado de Engram ${c.bold("v" + version)} (${process.arch})…`);
 
   let tmpDir;
