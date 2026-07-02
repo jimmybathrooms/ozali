@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync, audit, cloud } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit, cloud, workspace } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -14,6 +14,8 @@ ${c.bold("Uso:")}
 ${c.bold("Comandos:")}
   init      Detecta el agente (Claude Code/opencode), instala las skills ozali y
             ozali-commit, aísla el histórico, configura Engram y el repo de conocimiento.
+  workspace Multi-repo: escanea los repos de la carpeta raíz, remedia los que no tienen
+            ozali init, guía la calibración y escribe la config para trabajar en conjunto.
   doctor    Health-check read-only del proyecto (fuente de verdad, Engram, versión de cdk, TDD…).
   update    Actualiza la instalación (skills ozali + ozali-commit + ozali-jarvis + permisos)
             al paquete y avisa si la skill cdk quedó desactualizada.
@@ -26,6 +28,7 @@ ${c.bold("Opciones comunes:")}
   --dry-run            (init) Muestra el plan sin escribir nada.
   --agent <a>          (init) claude-code | opencode | both.
   --scope <s>          (init) project | global.
+  --depth <n>          (workspace) Niveles a escanear bajo la raíz (default 1).
   --knowledge-repo <p> (init) Ruta del repo de conocimiento.
   --no-engram          (init) No usar Engram; arranca en modo docs.
   --no-trust           (init) No marcar el workspace como confiable en Claude Code.
@@ -69,6 +72,7 @@ function parseArgs(argv) {
     else if (a === "--stats") opts.stats = true;
     else if (a === "--agent") opts.agent = argv[++i];
     else if (a === "--scope") opts.scope = argv[++i];
+    else if (a === "--depth") opts.depth = argv[++i];
     else if (a === "--knowledge-repo") opts.knowledgeRepo = argv[++i];
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "-v" || a === "--version") opts.version = true;
@@ -89,6 +93,7 @@ async function main() {
   console.log(`${c.bold("ozali")} ${c.dim("v" + pkgVersion())}`);
   switch (cmd) {
     case "init": return await init(cwd, opts);
+    case "workspace": return await workspace(cwd, opts);
     case "doctor": return doctor(cwd);
     case "update": return update(cwd, opts);
     case "sync": return sync(cwd, opts);

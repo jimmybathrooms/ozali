@@ -60,6 +60,7 @@ git clone <repo> && node ozali/cli/bin/ozali.mjs init
 
 ```bash
 ozali init      # detecta agente, instala skills ozali + ozali-commit, aísla histórico, configura Engram
+ozali workspace # multi-repo: escanea la carpeta raíz, remedia init/calibración y cablea la config conjunta
 ozali doctor    # health-check read-only (fuente de verdad, Engram, Cloud, versión de cdk, Strict TDD…)
 ozali update    # actualiza skills ozali + ozali-commit + ozali-jarvis + permisos; avisa si cdk quedó atrás
 ozali sync      # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
@@ -70,6 +71,31 @@ ozali audit     # navega/audita la memoria de Engram del proyecto (o general)
 **ese proyecto** o **general** (todos los proyectos); fuera de un repo va directo a general. Usa
 `--tui` para el navegador interactivo, `--search "<texto>"` para buscar y `--general` para forzar el
 alcance. Sin Engram, audita el histórico local de `.ozali/docs/`.
+
+### Workspaces multi-repo
+
+Cuando abres en tu editor (VSCode, **Antigravity**) una **carpeta raíz con varios repos** que se
+referencian entre sí, corre **una vez** en esa raíz:
+
+```bash
+ozali workspace           # escanea repos hijos, remedia los que faltan y escribe la config conjunta
+ozali workspace --dry-run # solo muestra el inventario y el plan, sin escribir
+ozali workspace --depth 2 # busca repos hasta 2 niveles (para raíces con subcarpetas de grupo)
+```
+
+Qué hace, en orden: (1) **escanea** los repos hijos y reporta su estado —`✔ listo`, `⚠ sin calibrar`
+(falta `cdk`) o `✖ sin init`—; (2) **remedia** con `ozali init` los que no lo tienen y te **guía** para
+calibrar (correr la skill `ozali` en cada repo — eso lo hace el agente, no el CLI); (3) **infiere las
+referencias** entre repos (dependencias npm cruzadas, submódulos git, `docker-compose`) y las confirma
+contigo; y (4) escribe la config para **trabajar en conjunto**:
+
+- `ozali-workspace.json` — manifiesto de miembros, estado y referencias.
+- `<carpeta>.code-workspace` — workspace multi-root que abre todos los repos juntos.
+- Orquestador **`ozali-workspace-jarvis`** en `CLAUDE.md`/`AGENTS.md` de la raíz: coordina los repos
+  según el manifiesto y delega la ejecución en el `cdk` de cada uno.
+
+Es **idempotente**: re-córrelo cuando agregues repos o cambien las referencias. Detalle completo en
+[`docs/workspaces.md`](docs/workspaces.md).
 
 ### Actualizar a una versión nueva
 

@@ -36,7 +36,7 @@ test("--version imprime la versión del package.json", () => {
 
 test("--help menciona los comandos", () => {
   const { stdout } = run(["--help"]);
-  for (const cmd of ["init", "doctor", "update", "sync", "audit"]) assert.match(stdout, new RegExp(cmd));
+  for (const cmd of ["init", "workspace", "doctor", "update", "sync", "audit"]) assert.match(stdout, new RegExp(cmd));
 });
 
 test("audit imprime cabecera y no rompe (general)", () => {
@@ -204,6 +204,67 @@ test("update también instala ozali-commit en repos previos", () => {
     assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "ozali-commit", "SKILL.md")), "update instala ozali-commit");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ workspace
+function wsRepo(root, name, { config = false, cdk = false, pkg = null } = {}) {
+  const dir = path.join(root, name);
+  fs.mkdirSync(dir, { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  if (config) {
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ozali", "config.json"), JSON.stringify({ agent: "claude-code" }));
+  }
+  if (cdk) {
+    fs.mkdirSync(path.join(dir, ".claude", "skills", "cdk"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".claude", "skills", "cdk", "SKILL.md"), "---\nname: cdk\n---\n");
+  }
+  if (pkg) fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(pkg));
+}
+
+test("workspace escanea y clasifica repos hijos sin escribir (dry-run)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    wsRepo(root, "web", { config: true, pkg: { name: "web", dependencies: { api: "^1" } } });
+    wsRepo(root, "lib-bare", { pkg: { name: "lib" } });
+    const { stdout } = run(["workspace", "--dry-run"], root);
+    assert.match(stdout, /listo/, "clasifica api como listo");
+    assert.match(stdout, /sin calibrar/, "clasifica web como sin calibrar");
+    assert.match(stdout, /sin init/, "clasifica lib-bare como sin init");
+    assert.match(stdout, /web → api \(npm-dep\)/, "detecta la referencia npm web→api");
+    assert.match(stdout, /no escribo nada/, "dry-run no escribe");
+    assert.ok(!fs.existsSync(path.join(root, "ozali-workspace.json")), "dry-run: no hay manifiesto");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace escribe manifiesto + .code-workspace + jarvis y es idempotente", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    // Ambos ready (con cdk) → sin missing-init, no invoca init pesado.
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    wsRepo(root, "web", { config: true, cdk: true, pkg: { name: "web", dependencies: { api: "^1" } } });
+    run(["workspace", "--yes", "--no-trust"], root);
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, "ozali-workspace.json"), "utf8"));
+    assert.equal(manifest.members.length, 2, "manifiesto con 2 miembros");
+    assert.ok(manifest.references.some((r) => r.from === "web" && r.to === "api"), "referencia web→api en el manifiesto");
+
+    const wsFile = path.join(root, `${path.basename(root)}.code-workspace`);
+    assert.ok(fs.existsSync(wsFile), ".code-workspace escrito");
+    assert.equal(JSON.parse(fs.readFileSync(wsFile, "utf8")).folders.length, 2, "multi-root con 2 folders");
+    assert.match(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8"), /ozali-workspace-jarvis:start/, "bloque jarvis en CLAUDE.md");
+
+    // idempotencia: re-correr no duplica
+    run(["workspace", "--yes", "--no-trust"], root);
+    const claude = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8");
+    assert.equal((claude.match(/ozali-workspace-jarvis:start/g) || []).length, 1, "no duplica el bloque jarvis");
+    assert.equal(JSON.parse(fs.readFileSync(wsFile, "utf8")).folders.length, 2, "no duplica folders");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

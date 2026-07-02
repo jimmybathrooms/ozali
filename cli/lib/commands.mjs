@@ -6,9 +6,9 @@ import {
   c, ok, warn, err, info, step,
   SKILL_SRC, COMMIT_SKILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, tryExec, spawnCmd, which, engramAssetName,
-  projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL,
+  projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
 } from "./util.mjs";
-import { detectAll } from "./detect.mjs";
+import { detectAll, detectWorkspace, detectReferences } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
 
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
@@ -623,17 +623,17 @@ const JARVIS_BEGIN = "<!-- ozali-jarvis:start -->";
 const JARVIS_END = "<!-- ozali-jarvis:end -->";
 
 /** Cuerpo del bloque jarvis para CLAUDE.md / AGENTS.md (sin el frontmatter del template). */
-function jarvisPersonaBody() {
-  const tpl = fs.readFileSync(path.join(TEMPLATES_SRC, "ozali-jarvis.md"), "utf8");
+function jarvisPersonaBody(tpl = "ozali-jarvis.md") {
+  const raw = fs.readFileSync(path.join(TEMPLATES_SRC, tpl), "utf8");
   // Quita el frontmatter YAML (--- ... ---) y deja el cuerpo markdown.
-  return tpl.replace(/^---[\s\S]*?---\s*/, "").trim();
+  return raw.replace(/^---[\s\S]*?---\s*/, "").trim();
 }
 
 /** Inserta/actualiza un bloque marcado en un archivo markdown (idempotente). */
-function upsertMarkedBlock(file, body) {
-  const block = `${JARVIS_BEGIN}\n${body}\n${JARVIS_END}`;
+function upsertMarkedBlock(file, body, begin = JARVIS_BEGIN, end = JARVIS_END) {
+  const block = `${begin}\n${body}\n${end}`;
   let txt = exists(file) ? fs.readFileSync(file, "utf8") : "";
-  const re = new RegExp(`${JARVIS_BEGIN}[\\s\\S]*?${JARVIS_END}`);
+  const re = new RegExp(`${begin}[\\s\\S]*?${end}`);
   let changed;
   if (re.test(txt)) {
     const next = txt.replace(re, block);
@@ -755,6 +755,193 @@ function ensureOpencodeProfile(cwd) {
   if (perm.bash === undefined) perm.bash = { "*": "allow", "rm -rf *": "ask", "git push *": "ask" };
   writeJSON(p, base);
   ok(`Perfil base de permisos de opencode en ${c.bold("opencode.json")} (lectura+comandos libres, ediciones confirman).`);
+}
+
+// ========================================================= workspace =========
+// Configuración multi-repo: escanea repos hijos de una carpeta raíz, remedia los
+// que no tienen ozali init, guía la calibración (que hace el agente), y escribe
+// 3 capas de config: manifiesto + .code-workspace + orquestador de workspace.
+const WS_JARVIS_BEGIN = "<!-- ozali-workspace-jarvis:start -->";
+const WS_JARVIS_END = "<!-- ozali-workspace-jarvis:end -->";
+const WS_MANIFEST = (root) => path.join(root, "ozali-workspace.json");
+
+const STATUS_LABEL = {
+  "ready": () => c.green("✔ listo"),
+  "needs-calibration": () => c.yellow("⚠ sin calibrar (falta cdk)"),
+  "missing-init": () => c.red("✖ sin init"),
+};
+
+export async function workspace(cwd, opts = {}) {
+  step("ozali workspace — configuración multi-repo");
+  const depth = opts.depth ? (parseInt(opts.depth, 10) || 1) : 1;
+
+  // Fase A — escaneo (read-only)
+  let ws = detectWorkspace(cwd, { depth });
+  if (ws.members.length === 0) {
+    warn("No encontré repositorios git como hijos de esta carpeta.");
+    info("Corre " + c.bold("ozali workspace") + " desde la carpeta que agrupa tus repos (o usa " + c.bold("--depth 2") + ").");
+    return 1;
+  }
+  step("Repos detectados");
+  printMembers(ws.members);
+
+  // Fase B — remediación de los que no tienen ozali init
+  const missing = ws.members.filter((m) => m.status === "missing-init");
+  if (missing.length && opts.dryRun) {
+    info(`(dry-run) Aquí correría ${c.bold("ozali init")} en: ${c.bold(missing.map((m) => m.dir).join(", "))}.`);
+  } else if (missing.length) {
+    step("Repos sin ozali init");
+    const base = inheritedConfig(ws.members);
+    const shared = {
+      agent: opts.agent || (base && base.agent),
+      scope: opts.scope || (base && base.scope),
+      knowledgeRepo: opts.knowledgeRepo || (base && base.knowledgeRepo),
+    };
+    for (const m of missing) {
+      const go = opts.yes ? true : await confirm(`¿Correr ${c.bold("ozali init")} en ${c.bold(m.dir)}?`, true);
+      if (!go) { info(`Saltado: ${m.dir}.`); continue; }
+      await init(m.path, { ...opts, ...shared });
+    }
+    ws = detectWorkspace(cwd, { depth }); // re-escanea tras remediar
+  }
+
+  // Guía de calibración (el CLI NO puede calibrar; lo hace el agente)
+  const needCal = ws.members.filter((m) => m.status === "needs-calibration");
+  if (needCal.length) {
+    step("Calibración pendiente (la hace tu agente, no el CLI)");
+    warn(`${needCal.length} repo(s) tienen ozali init pero aún no generan su skill ${c.bold("cdk")}.`);
+    for (const m of needCal) {
+      console.log(`  • ${c.bold(m.dir)} → abre el repo en tu agente y corre la skill ${c.bold("ozali")} (${c.dim('"diagnostica el proyecto"')}).`);
+    }
+  }
+
+  // Fase C — referencias entre repos (auto-detección + confirmación)
+  const references = await confirmReferences(detectReferences(ws.members), opts);
+
+  if (opts.dryRun) { warn("--dry-run: no escribo nada. Plan mostrado arriba."); return 0; }
+
+  // Fase D — escritura de la configuración del workspace
+  step("Escribiendo configuración del workspace");
+  const manifest = writeWorkspaceManifest(cwd, ws.members, references, opts);
+  writeCodeWorkspace(cwd, ws.members);
+
+  const agent = manifest.agent;
+  if (agent === "claude-code" || agent === "both") {
+    ensureWorkspaceJarvisClaudeCode(cwd);
+    if (!opts.noTrust) await ensureClaudeWorkspaceTrust(cwd, opts);
+  }
+  if (agent === "opencode" || agent === "both") ensureWorkspaceJarvisOpencode(cwd);
+
+  if (gitInfo(cwd).isRepo) {
+    const { added } = ensureGitignore(cwd, [".claude/", ".engram/", ".ozali/"]);
+    if (added.length) ok(`.gitignore de la raíz actualizado: ${added.join(", ")}.`);
+  }
+
+  // Siguientes pasos
+  step("Siguientes pasos");
+  const wsFile = `${path.basename(cwd)}.code-workspace`;
+  console.log(`  1. Abre el workspace en tu editor: ${c.bold(wsFile)} ${c.dim("(VSCode/Antigravity → Open Workspace).")}`);
+  if (needCal.length) console.log(`  2. Calibra los repos pendientes (${c.bold(needCal.map((m) => m.dir).join(", "))}) corriendo la skill ${c.bold("ozali")} en cada uno.`);
+  console.log(`  ${c.dim("Re-corre")} ${c.bold("ozali workspace")} ${c.dim("cuando agregues repos o cambien las referencias (es idempotente).")}`);
+  return 0;
+}
+
+/** Primer .ozali/config.json entre los miembros ya inicializados (para heredar defaults). */
+function inheritedConfig(members) {
+  for (const m of members) {
+    const cfg = readJSON(path.join(m.path, ".ozali", "config.json"));
+    if (cfg) return cfg;
+  }
+  return null;
+}
+
+function printMembers(members) {
+  const pad = Math.max(4, ...members.map((m) => m.dir.length));
+  for (const m of members) {
+    const label = (STATUS_LABEL[m.status] || (() => m.status))();
+    const sot = m.sot.found ? c.dim(`sot:${m.sot.variant}`) : c.dim("sot:—");
+    const eng = m.engramProject ? c.dim(` engram:${m.engramProject}`) : "";
+    console.log(`  ${c.bold(m.dir.padEnd(pad))}  ${label}  ${sot}${eng}`);
+  }
+}
+
+async function confirmReferences(detected, opts) {
+  if (detected.length === 0) { info("No detecté referencias automáticas entre los repos."); return []; }
+  step("Referencias detectadas entre repos");
+  for (const e of detected) console.log(`  • ${c.bold(e.fromDir)} → ${c.bold(e.toDir)} ${c.dim("(" + e.kind + ")")}`);
+  if (opts.yes) return detected;
+  if (await confirm(`¿Registrar las ${detected.length} referencias detectadas?`, true)) return detected;
+  const kept = [];
+  for (const e of detected) {
+    if (await confirm(`  ¿Registrar ${e.fromDir} → ${e.toDir} (${e.kind})?`, true)) kept.push(e);
+  }
+  return kept;
+}
+
+function writeWorkspaceManifest(root, members, references, opts) {
+  const existing = readJSON(WS_MANIFEST(root)) || {};
+  const base = inheritedConfig(members) || {};
+  const agent = opts.agent || existing.agent || base.agent || "claude-code";
+  const manifest = {
+    version: pkgVersion(),
+    root,
+    agent,
+    knowledgeRepo: opts.knowledgeRepo || existing.knowledgeRepo || base.knowledgeRepo || DEFAULT_KNOWLEDGE,
+    cloud: base.cloud || existing.cloud || { enabled: false },
+    members: members.map((m) => ({ path: m.dir, project: m.project, status: m.status, sot: m.sot.found ? m.sot.variant : null })),
+    references: references.map((e) => ({ from: e.fromDir, to: e.toDir, kind: e.kind })),
+    createdAt: existing.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  writeJSON(WS_MANIFEST(root), manifest);
+  ok(`Manifiesto escrito en ${c.bold("ozali-workspace.json")} (${members.length} repos, ${references.length} referencias).`);
+  return manifest;
+}
+
+function writeCodeWorkspace(root, members) {
+  const file = path.join(root, `${path.basename(root)}.code-workspace`);
+  const existing = readJSON(file) || {};
+  const folders = Array.isArray(existing.folders) ? existing.folders.slice() : [];
+  const have = new Set(folders.map((f) => f && f.path));
+  for (const m of members) if (!have.has(m.dir)) folders.push({ path: m.dir });
+  const cfg = {
+    folders,
+    settings: existing.settings || {},
+    extensions: existing.extensions || { recommendations: ["anthropic.claude-code"] },
+  };
+  writeJSON(file, cfg);
+  ok(`Workspace de editor escrito en ${c.bold(path.basename(file))} (${folders.length} carpetas, multi-root).`);
+}
+
+function ensureWorkspaceJarvisClaudeCode(root) {
+  const claudeMd = path.join(root, "CLAUDE.md");
+  const ch = upsertMarkedBlock(claudeMd, jarvisPersonaBody("ozali-workspace-jarvis.md"), WS_JARVIS_BEGIN, WS_JARVIS_END);
+  ok(`ozali-workspace-jarvis ${ch ? "escrito" : "ya presente"} en ${c.bold("CLAUDE.md")} de la raíz.`);
+  const agentFile = path.join(root, ".claude", "agents", "ozali-workspace-jarvis.md");
+  ensureDir(path.dirname(agentFile));
+  fs.copyFileSync(path.join(TEMPLATES_SRC, "ozali-workspace-jarvis.md"), agentFile);
+  ok(`Subagente ${c.bold(".claude/agents/ozali-workspace-jarvis.md")} instalado.`);
+}
+
+function ensureWorkspaceJarvisOpencode(root) {
+  const agentsMd = path.join(root, "AGENTS.md");
+  const ch = upsertMarkedBlock(agentsMd, jarvisPersonaBody("ozali-workspace-jarvis.md"), WS_JARVIS_BEGIN, WS_JARVIS_END);
+  ok(`ozali-workspace-jarvis ${ch ? "escrito" : "ya presente"} en ${c.bold("AGENTS.md")} de la raíz.`);
+  const p = path.join(root, "opencode.json");
+  const cfg = readJSON(p, {});
+  cfg.$schema = cfg.$schema || "https://opencode.ai/config.json";
+  cfg.agent = cfg.agent || {};
+  if (!cfg.agent["ozali-workspace-jarvis"]) {
+    cfg.agent["ozali-workspace-jarvis"] = {
+      mode: "primary",
+      description: "Orquestador multi-repo: coordina repos hermanos según ozali-workspace.json.",
+      prompt: "{file:./AGENTS.md}",
+    };
+    writeJSON(p, cfg);
+    ok(`Agente ${c.bold("ozali-workspace-jarvis")} (primary) añadido a ${c.bold("opencode.json")}.`);
+  } else {
+    info("Agente ozali-workspace-jarvis ya presente en opencode.json.");
+  }
 }
 
 // =========================================================== doctor ==========
