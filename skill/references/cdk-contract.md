@@ -45,14 +45,23 @@ El número vive en **un solo lugar** (el marcador HTML de la primera línea, for
 
 Al migrar un `cdk` legado o desactualizado, **siempre**:
 
-1. **Elimina toda referencia a `copsis-commit`** (nombre heredado de versiones anteriores) y
-   **reemplázala por `ozali-commit`** — la skill de commit vigente que `ozali init`/`ozali update`
-   instalan en `.claude/skills/ozali-commit/`.
-2. **Preserva** el histórico por hito (`.ozali/docs/cdk/`) y los planes congelados
+1. **Elimina toda referencia a la nomenclatura heredada** (`copsis-commit`, `copsis-doctor` — nombres
+   de versiones anteriores del ecosistema, predecesoras de `ozali`) y **reemplázala por la de
+   `ozali`**:
+   - `copsis-commit` → **`ozali-commit`** (la skill de commit vigente que `ozali init`/`ozali update`
+     instalan en `.claude/skills/ozali-commit/`).
+   - Refs a plantillas o a la skill **`copsis-doctor`** → sus equivalentes de `ozali` (esta skill y
+     sus `references/`). No debe quedar ninguna mención a `copsis-*` en el `cdk` migrado.
+2. **Migra el histórico legado de docs**: si existe `.copsis/docs/cdk/` (la ruta que usaba
+   `copsis-doctor`), **mueve** su contenido a `.ozali/docs/cdk/` — fusionando **por hito** y **sin
+   sobrescribir** lo que ya exista en el destino — y **elimina** la carpeta `.copsis/` una vez vacía.
+   Si `.copsis/` contiene otras subrutas legadas (p. ej. `.copsis/metrics/`), reubícalas bajo
+   `.ozali/` de forma equivalente antes de borrar `.copsis/`.
+3. **Preserva** el histórico por hito ya en `.ozali/docs/cdk/` y los planes congelados
    (`02-plan-aprobado.md`): la migración del contrato **nunca** los borra ni reescribe.
-3. **Estampa** `cdk_contract_version: N` en el frontmatter del `cdk` migrado.
-4. **Reporta** al usuario, en texto, qué cambió (referencias migradas, secciones actualizadas,
-   versión nueva).
+4. **Estampa** `cdk_contract_version: N` en el frontmatter del `cdk` migrado.
+5. **Reporta** al usuario, en texto, qué cambió (referencias migradas, docs reubicados de `.copsis/`
+   a `.ozali/`, secciones actualizadas, versión nueva).
 
 ---
 

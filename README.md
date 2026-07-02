@@ -87,7 +87,7 @@ automáticamente** al contrato vigente (eliminando `copsis-commit` y cableando `
 estampa la versión — tus docs por hito y el plan congelado se conservan.
 
 > **Commit del hito (`ozali-commit`):** `init`/`update` instalan la skill `ozali-commit`
-> (`.claude/skills/ozali-commit/`), sucesora de `copsis-commit`. `cdk` la invoca al cerrar cada hito
+> (`.claude/skills/ozali-commit/`). `cdk` la invoca al cerrar cada hito
 > para generar el commit convencional (feat/fix/hotfix/refactor + scope) tras tu aprobación.
 
 `init` también escribe un **perfil base de permisos** (`.claude/settings.json` para Claude Code,
@@ -145,7 +145,7 @@ Claude Code y opencode (perfiles de permisos para ambos en
 
 > Siguiente paso natural: crear el repo en GitHub y publicar la primera versión (`pnpm publish` vía tag), más probar el bootstrap en un repo real del equipo.
 
-> Linaje: `ozali` evoluciona la skill `copsis-doctor`, nutrida con conceptos de
+> Linaje: `ozali` se nutre de conceptos de
 > [gentle-ai](https://github.com/Gentleman-Programming/gentle-ai) (Engram, calibración SDD/TDD,
 > distribución plug-n-play).
 

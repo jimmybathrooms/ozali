@@ -1,13 +1,13 @@
 ---
 name: ozali-commit
-description: Genera un "commit summary" convencional (feat/fix/hotfix/refactor) con prefijo, scope y descripción a partir de los cambios EN STAGE y commitea tras tu aprobación. Úsala cuando el usuario quiera "commitea", "haz el commit", "genera el mensaje de commit", "cierra el hito con commit", o cuando otra skill (p. ej. cdk) cierre un hito. Sucesora de copsis-commit.
+description: Genera un "commit summary" convencional (feat/fix/hotfix/refactor) con prefijo, scope y descripción a partir de los cambios EN STAGE y commitea tras tu aprobación. Úsala cuando el usuario quiera "commitea", "haz el commit", "genera el mensaje de commit", "cierra el hito con commit", o cuando otra skill (p. ej. cdk) cierre un hito.
 ---
 
 # Skill: ozali-commit
 
 `ozali-commit` produce el **mensaje de commit** de un cambio siguiendo
 [Conventional Commits](https://www.conventionalcommits.org/) y lo **commitea tras tu aprobación**.
-Es la skill de commit vigente del ecosistema `ozali` (sucede a la antigua `copsis-commit`).
+Es la skill de commit vigente del ecosistema `ozali`.
 
 `cdk` la invoca en el **cierre de cada hito**, pero también puedes usarla suelta en cualquier repo.
 

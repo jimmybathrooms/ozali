@@ -92,14 +92,19 @@ Guarda estos valores; se reutilizan en Fase 6 y en la documentación.
 4. **Migración automática (`MIGRAR`)** — aplica los deltas del changelog de
    [`references/cdk-contract.md`](references/cdk-contract.md) sobre el `cdk` instalado, **sin** pasar
    por el GATE, porque preserva el `cdk` del usuario y solo actualiza el contrato:
-   - **Elimina toda referencia a `copsis-commit`** y reemplázala por **`ozali-commit`** (la skill de
-     commit vigente, instalada en `.claude/skills/ozali-commit/`).
+   - **Elimina toda referencia a la nomenclatura heredada** (`copsis-commit`, `copsis-doctor`) y
+     reemplázala por la de `ozali`: `copsis-commit` → **`ozali-commit`** (instalada en
+     `.claude/skills/ozali-commit/`); refs a plantillas o a la skill `copsis-doctor` → sus
+     equivalentes de `ozali`. No debe quedar ninguna mención a `copsis-*`.
+   - **Migra el histórico legado**: si existe `.copsis/docs/cdk/` (la ruta de `copsis-doctor`),
+     **mueve** su contenido a `.ozali/docs/cdk/` (fusiona **por hito**, **sin sobrescribir** lo ya
+     existente) y **borra** la carpeta `.copsis/` una vez vacía.
    - Aplica el resto de deltas del changelog (recall-first, telemetría, etc. según la versión).
    - **Estampa** `cdk_contract_version: N` en el frontmatter del `cdk`.
-   - **Preserva** intactos `.ozali/docs/cdk/` (histórico por hito) y los planes congelados
-     (`02-plan-aprobado.md`).
-   - **Reporta** al usuario, en texto, qué cambió (referencias migradas, secciones actualizadas,
-     versión nueva).
+   - **Preserva** intactos los docs ya en `.ozali/docs/cdk/` (histórico por hito) y los planes
+     congelados (`02-plan-aprobado.md`).
+   - **Reporta** al usuario, en texto, qué cambió (referencias migradas, docs reubicados de `.copsis/`
+     a `.ozali/`, secciones actualizadas, versión nueva).
    - **Excepción → GATE:** si un delta exige **regeneración estructural** (reescribir subagentes,
      cambiar el harness, rehacer el wiring de TDD), eso **no** es migración automática: preséntalo en
      el plan del GATE (Fase 5) y regénéralo en la Fase 6.
