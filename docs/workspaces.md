@@ -26,6 +26,18 @@ ozali workspace --no-trust   # no marca la raíz como confiable en Claude Code
 Un CLI **no puede auto-dispararse** con solo hacer `cd`; por eso es un comando explícito e
 **idempotente**: re-córrelo cuando agregues repos o cambien las referencias.
 
+### Operar todos los repos desde la raíz
+
+Para no entrar repo por repo, dos modos batch corren un comando sobre **todos los miembros**:
+
+```bash
+ozali workspace --doctor     # health-check de cada repo miembro + resumen consolidado
+ozali workspace --update     # actualiza skills/permisos/jarvis de cada repo + avisa de cdk desfasado
+```
+
+Ambos son **solo CLI** (no necesitan el agente) y saltan los repos `✖ sin init`. La **calibración**
+(generar `cdk`) sí la hace el agente, pero también **sin cambiar de proyecto** — ver abajo.
+
 ## Qué hace, paso a paso
 
 1. **Escaneo (read-only).** Enumera los repos git hijos y reporta el estado ozali de cada uno:
@@ -37,10 +49,11 @@ Un CLI **no puede auto-dispararse** con solo hacer `cd`; por eso es un comando e
    instala skills, aísla histórico, configura Engram). Hereda `agent`/`scope`/`knowledge-repo` de un
    repo ya inicializado para mantener el equipo consistente.
 
-3. **Guía de calibración.** El CLI **no calibra** (eso lo hace el agente). Para cada repo
-   `⚠ sin calibrar`, imprime la instrucción: abre ese repo en tu agente y corre la skill **`ozali`**
-   ("diagnostica el proyecto") para generar su `cdk`. El orquestador de workspace también queda
-   cableado para conducir esa calibración repo por repo.
+3. **Guía de calibración.** El CLI **no calibra** (eso lo hace el agente), pero ya **no** tienes que
+   abrir cada repo por separado: `ozali workspace` instala la skill **`ozali`** en la **raíz**, y el
+   orquestador `ozali-workspace-jarvis` la usa **en modo target** para calibrar cada repo
+   `⚠ sin calibrar` **desde el workspace**, repo por repo y con su propio 🛑 GATE. Abre el agente en la
+   raíz y pídele *"calibra los repos pendientes"*.
 
 4. **Referencias (auto-detección + confirmación).** Infiere aristas dirigidas `from → to`:
    - `npm-dep` — el `name` de un repo aparece en `dependencies`/`devDependencies`/`peerDependencies` de otro.
@@ -58,6 +71,7 @@ En la carpeta raíz:
 | `ozali-workspace.json` | Manifiesto: miembros (ruta, proyecto, estado, fuente de verdad), referencias, `knowledgeRepo`, cloud. Fuente de verdad del workspace. |
 | `<carpeta>.code-workspace` | Workspace **multi-root** de VSCode/Antigravity: abre todos los repos juntos. Merge idempotente si ya existe. |
 | `CLAUDE.md` / `AGENTS.md` (raíz) | Bloque marcado del orquestador **`ozali-workspace-jarvis`** + subagente / agente de opencode. |
+| `.claude/skills/ozali/` (raíz) | La skill **`ozali`** instalada en la raíz para **calibrar miembros en modo target** sin cambiar de proyecto (solo Claude Code). |
 
 Si la raíz es a su vez un repo git, se añade `.claude/`, `.engram/` y `.ozali/` a su `.gitignore`
 (los artefactos locales del agente no se commitean). `ozali-workspace.json` y `.code-workspace` **sí**
@@ -78,5 +92,5 @@ miembros). Su trabajo:
 ## Fuera de alcance (por ahora)
 
 - Auto-sugerencia al abrir la carpeta (tarea de editor/hook).
-- `ozali doctor`/`sync` agregados a nivel workspace.
+- `ozali sync` agregado a nivel workspace (`--doctor`/`--update` ya existen; falta `--sync`).
 - Detección de referencias más allá de npm/submódulos/compose (imports TS/py, `go.work`).

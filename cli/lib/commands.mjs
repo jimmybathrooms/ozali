@@ -793,6 +793,10 @@ export async function workspace(cwd, opts = {}) {
   step("Repos detectados");
   printMembers(ws.members);
 
+  // Modos batch (Track 1): operan sobre los miembros del workspace ya existente y salen.
+  if (opts.wsDoctor) return workspaceDoctor(ws.members);
+  if (opts.wsUpdate) return workspaceUpdate(ws.members, opts);
+
   // Fase B — remediación de los que no tienen ozali init
   const missing = ws.members.filter((m) => m.status === "missing-init");
   if (missing.length && opts.dryRun) {
@@ -836,6 +840,7 @@ export async function workspace(cwd, opts = {}) {
   const agent = manifest.agent;
   if (agent === "claude-code" || agent === "both") {
     ensureWorkspaceJarvisClaudeCode(cwd);
+    ensureWorkspaceOzaliSkill(cwd); // Track 2: skill ozali en la raíz → calibrar miembros desde el workspace
     if (!opts.noTrust) await ensureClaudeWorkspaceTrust(cwd, opts);
   }
   if (agent === "opencode" || agent === "both") ensureWorkspaceJarvisOpencode(cwd);
@@ -849,9 +854,66 @@ export async function workspace(cwd, opts = {}) {
   step("Siguientes pasos");
   const wsFile = `${path.basename(cwd)}.code-workspace`;
   console.log(`  1. Abre el workspace en tu editor: ${c.bold(wsFile)} ${c.dim("(VSCode/Antigravity → Open Workspace).")}`);
-  if (needCal.length) console.log(`  2. Calibra los repos pendientes (${c.bold(needCal.map((m) => m.dir).join(", "))}) corriendo la skill ${c.bold("ozali")} en cada uno.`);
+  if (needCal.length) {
+    console.log(`  2. Calibra los pendientes (${c.bold(needCal.map((m) => m.dir).join(", "))}) ${c.dim("sin salir del workspace:")}`);
+    console.log(`     ${c.dim("abre el agente en la raíz y pide a")} ${c.bold("ozali-workspace-jarvis")} ${c.dim('que "calibre los repos pendientes"')}`);
+    console.log(`     ${c.dim("(usa la skill")} ${c.bold("ozali")} ${c.dim("en modo target, repo por repo con su GATE).")}`);
+  }
+  console.log(`  ${c.dim("• Salud de todos los repos:")}     ${c.bold("ozali workspace --doctor")}`);
+  console.log(`  ${c.dim("• Actualizar todos los repos:")}   ${c.bold("ozali workspace --update")}`);
   console.log(`  ${c.dim("Re-corre")} ${c.bold("ozali workspace")} ${c.dim("cuando agregues repos o cambien las referencias (es idempotente).")}`);
   return 0;
+}
+
+/** Track 1 — health-check de todos los miembros (doctor por repo) + resumen consolidado. */
+function workspaceDoctor(members) {
+  const results = [];
+  for (const m of members) {
+    console.log("");
+    console.log(c.bold(c.magenta(`── ${m.dir} ──`)));
+    if (m.status === "missing-init") {
+      warn(`Sin ozali init → córrelo (o re-corre ${c.bold("ozali workspace")}).`);
+      results.push({ dir: m.dir, ok: false, note: "sin init" });
+      continue;
+    }
+    const code = doctor(m.path);
+    results.push({ dir: m.dir, ok: code === 0, note: code === 0 ? "todo en orden" : "puntos a atender" });
+  }
+  step("Resumen del workspace");
+  const pad = Math.max(4, ...members.map((m) => m.dir.length));
+  for (const r of results) {
+    console.log(`  ${r.ok ? c.green("✔") : c.yellow("✖")} ${r.dir.padEnd(pad)}  ${c.dim(r.note)}`);
+  }
+  return results.every((r) => r.ok) ? 0 : 1;
+}
+
+/** Track 1 — update de todos los miembros ozali (skills/permisos/jarvis) + resumen. */
+function workspaceUpdate(members, opts) {
+  const results = [];
+  let failed = 0;
+  for (const m of members) {
+    console.log("");
+    console.log(c.bold(c.magenta(`── ${m.dir} ──`)));
+    if (m.status === "missing-init") {
+      warn("Sin ozali init → nada que actualizar (córrelo primero).");
+      results.push({ dir: m.dir, mark: c.yellow("—"), note: "sin init (saltado)" });
+      continue;
+    }
+    const code = update(m.path, opts);
+    if (code !== 0) failed++;
+    results.push({ dir: m.dir, mark: code === 0 ? c.green("✔") : c.yellow("✖"), note: code === 0 ? "actualizado" : "revisar" });
+  }
+  step("Resumen del workspace");
+  const pad = Math.max(4, ...members.map((m) => m.dir.length));
+  for (const r of results) console.log(`  ${r.mark} ${r.dir.padEnd(pad)}  ${c.dim(r.note)}`);
+  info(`La skill ${c.bold("cdk")} la regenera el agente. Re-corre ${c.bold("ozali workspace")} para refrescar estados.`);
+  return failed > 0 ? 1 : 0;
+}
+
+/** Track 2 — instala la skill `ozali` en la raíz para calibrar miembros desde el workspace. */
+function ensureWorkspaceOzaliSkill(root) {
+  copyDir(SKILL_SRC, path.join(root, ".claude", "skills", "ozali"));
+  ok(`Skill ${c.bold("ozali")} instalada en la raíz (${c.bold(".claude/skills/ozali")}) para calibrar miembros desde el workspace.`);
 }
 
 /** Primer .ozali/config.json entre los miembros ya inicializados (para heredar defaults). */

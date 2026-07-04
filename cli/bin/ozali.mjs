@@ -16,6 +16,7 @@ ${c.bold("Comandos:")}
             ozali-commit, aísla el histórico, configura Engram y el repo de conocimiento.
   workspace Multi-repo: escanea los repos de la carpeta raíz, remedia los que no tienen
             ozali init, guía la calibración y escribe la config para trabajar en conjunto.
+            Con --doctor / --update opera sobre TODOS los repos miembros desde la raíz.
   doctor    Health-check read-only del proyecto (fuente de verdad, Engram, versión de cdk, TDD…).
   update    Actualiza la instalación (skills ozali + ozali-commit + ozali-jarvis + permisos)
             al paquete y avisa si la skill cdk quedó desactualizada.
@@ -29,6 +30,8 @@ ${c.bold("Opciones comunes:")}
   --agent <a>          (init) claude-code | opencode | both.
   --scope <s>          (init) project | global.
   --depth <n>          (workspace) Niveles a escanear bajo la raíz (default 1).
+  --doctor             (workspace) Health-check de TODOS los repos miembros + resumen.
+  --update             (workspace) Actualiza (skills/permisos/jarvis) TODOS los repos miembros.
   --knowledge-repo <p> (init) Ruta del repo de conocimiento.
   --no-engram          (init) No usar Engram; arranca en modo docs.
   --no-trust           (init) No marcar el workspace como confiable en Claude Code.
@@ -73,6 +76,8 @@ function parseArgs(argv) {
     else if (a === "--agent") opts.agent = argv[++i];
     else if (a === "--scope") opts.scope = argv[++i];
     else if (a === "--depth") opts.depth = argv[++i];
+    else if (a === "--doctor") opts.wsDoctor = true;
+    else if (a === "--update") opts.wsUpdate = true;
     else if (a === "--knowledge-repo") opts.knowledgeRepo = argv[++i];
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "-v" || a === "--version") opts.version = true;

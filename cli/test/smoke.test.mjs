@@ -257,12 +257,59 @@ test("workspace escribe manifiesto + .code-workspace + jarvis y es idempotente",
     assert.ok(fs.existsSync(wsFile), ".code-workspace escrito");
     assert.equal(JSON.parse(fs.readFileSync(wsFile, "utf8")).folders.length, 2, "multi-root con 2 folders");
     assert.match(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8"), /ozali-workspace-jarvis:start/, "bloque jarvis en CLAUDE.md");
+    // Track 2: la skill ozali queda instalada en la raíz para calibrar miembros desde el workspace
+    assert.ok(fs.existsSync(path.join(root, ".claude", "skills", "ozali", "SKILL.md")), "skill ozali en la raíz");
 
     // idempotencia: re-correr no duplica
     run(["workspace", "--yes", "--no-trust"], root);
     const claude = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8");
     assert.equal((claude.match(/ozali-workspace-jarvis:start/g) || []).length, 1, "no duplica el bloque jarvis");
     assert.equal(JSON.parse(fs.readFileSync(wsFile, "utf8")).folders.length, 2, "no duplica folders");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace --doctor revisa cada miembro y saca resumen consolidado", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    wsRepo(root, "web", { config: true, cdk: true, pkg: { name: "web" } });
+    const { stdout } = run(["workspace", "--doctor"], root, true); // exit 1 esperado (repos sin sot/engram)
+    assert.match(stdout, /health-check/i, "corre doctor por repo");
+    assert.match(stdout, /Resumen del workspace/, "imprime el resumen consolidado");
+    assert.match(stdout, /api/, "menciona el repo api en el resumen");
+    assert.match(stdout, /web/, "menciona el repo web en el resumen");
+    assert.ok(!fs.existsSync(path.join(root, "ozali-workspace.json")), "--doctor no escribe config");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace --update actualiza cada miembro y salta los sin init", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    wsRepo(root, "bare", { pkg: { name: "bare" } }); // missing-init → se salta
+    const { stdout } = run(["workspace", "--update", "--yes", "--no-jarvis"], root);
+    assert.match(stdout, /Resumen del workspace/, "imprime el resumen consolidado");
+    assert.match(stdout, /Sin ozali init/, "salta el repo sin init");
+    assert.ok(!fs.existsSync(path.join(root, "ozali-workspace.json")), "--update no escribe config");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace no trata subcarpetas de un repo como miembros (solo repos propios)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: root }); // la raíz ES un repo git
+    fs.mkdirSync(path.join(root, "src"));                 // subcarpeta simple, NO repo propio
+    fs.writeFileSync(path.join(root, "src", "index.js"), "//\n");
+    wsRepo(root, "pkg", { config: true, cdk: true, pkg: { name: "pkg", version: "1.0.0" } }); // repo propio anidado
+    const { stdout } = run(["workspace", "--dry-run"], root);
+    assert.match(stdout, /\bpkg\b/, "incluye el repo propio anidado");
+    assert.doesNotMatch(stdout, /\bsrc\b/, "no incluye la subcarpeta que no es repo propio");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

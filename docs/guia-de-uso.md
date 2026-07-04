@@ -81,6 +81,7 @@ Lleva el histórico y la memoria al repo de conocimiento del equipo. Tus compañ
 | Comando | Qué hace |
 |---|---|
 | `ozali init` | Prepara el proyecto (lo corres una vez por repo). |
+| `ozali workspace` | Configura varios repos de una carpeta para trabajar en conjunto (lo corres en la carpeta raíz). |
 | `ozali doctor` | Revisa que todo esté bien. Es solo lectura, no cambia nada. |
 | `ozali update` | Actualiza skill ozali + ozali-jarvis + permisos (y guía cómo regenerar cdk). |
 | `ozali sync` | Sube el histórico/memoria al repo de equipo. |
@@ -171,6 +172,51 @@ Atajos: `ozali audit --tui` abre un navegador interactivo de la memoria; `ozali 
 busca un término; `ozali audit --general` fuerza el alcance general. Si no tienes Engram, audita el
 histórico local de `.ozali/docs/`.
 
+---
+
+## Trabajar con varios repos a la vez (`ozali workspace`)
+
+¿Tienes una carpeta que agrupa **varios repositorios que se hablan entre sí** (una API, su front, una
+librería compartida) y quieres que tu agente trabaje con todos juntos? Corre **una vez** en esa
+carpeta raíz:
+
+```bash
+ozali workspace             # escanea los repos hijos, prepara los que falten y arma la config conjunta
+ozali workspace --dry-run   # solo te muestra el inventario y el plan, sin escribir nada
+ozali workspace --yes       # sin preguntas: acepta los defaults y las referencias detectadas
+ozali workspace --depth 2   # busca repos hasta 2 niveles (si están en subcarpetas de grupo)
+```
+
+Qué hace, en orden:
+
+1. **Revisa** cada repo y te dice cómo está: `✔ listo`, `⚠ sin calibrar` (le falta correr la skill
+   `ozali`) o `✖ sin init` (nunca se preparó).
+2. **Prepara** los que están `✖ sin init` corriendo `ozali init` por ti, y te **guía** para calibrar
+   los que están `⚠ sin calibrar` (abrir ese repo y escribir *"diagnostica el proyecto"* — eso lo
+   hace tu agente, no el comando).
+3. **Detecta las referencias** entre repos (dependencias npm cruzadas, submódulos, `docker-compose`) y
+   te pide confirmarlas.
+4. **Escribe la configuración** para trabajar en conjunto:
+   - `ozali-workspace.json` — el mapa de repos, su estado y sus referencias (esto **sí** se commitea).
+   - `<carpeta>.code-workspace` — ábrelo en VSCode/Antigravity y verás todos los repos juntos.
+   - **ozali-workspace-jarvis** en el `CLAUDE.md`/`AGENTS.md` de la raíz: un orquestador que coordina
+     los repos según ese mapa y delega el trabajo de código en el `cdk` de cada uno.
+
+**Sin ir a cada proyecto:** desde la carpeta raíz puedes operar todos los repos de una vez:
+
+```bash
+ozali workspace --doctor    # revisa la salud de todos los repos y saca un resumen
+ozali workspace --update    # actualiza skills, permisos y jarvis de todos los repos
+```
+
+Y para **calibrar** (generar `cdk`) los que estén `⚠ sin calibrar`, ya **no** abres cada proyecto:
+abre tu agente en la carpeta raíz y pídele *"calibra los repos pendientes"* — el orquestador los
+recorre **uno por uno** (cada uno con su aprobación) sin que cambies de proyecto.
+
+Es **idempotente**: vuelve a correrlo cuando agregues un repo o cambien las referencias — no duplica
+nada. Cada repo conserva su autonomía (su propio jarvis, su `cdk` y su memoria); el workspace solo
+los **coordina**. Detalle completo en [workspaces.md](workspaces.md).
+
 ## Preguntas frecuentes
 
 **¿Tengo que usar Engram?**
@@ -184,6 +230,10 @@ Lo corriste con `dlx`/`npx`, que es temporal. Instálalo global: `pnpm add -g oz
 
 **¿Esto ensucia mi repositorio?**
 No. El histórico y la memoria se aíslan (`.ozali/`, `.engram/` van al `.gitignore`).
+
+**Tengo varios repos que dependen entre sí. ¿Los conecto?**
+Sí: abre la carpeta que los agrupa y corre `ozali workspace`. Prepara los que falten y arma una
+config para que tu agente trabaje con todos juntos. Ver [arriba](#trabajar-con-varios-repos-a-la-vez-ozali-workspace).
 
 **Veo "this workspace has not been trusted" y mis permisos no aplican.**
 Es el aviso de seguridad de Claude Code: ignora los permisos del proyecto hasta confiar en él.

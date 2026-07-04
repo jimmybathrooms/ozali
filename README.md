@@ -80,7 +80,10 @@ referencian entre sí, corre **una vez** en esa raíz:
 ```bash
 ozali workspace           # escanea repos hijos, remedia los que faltan y escribe la config conjunta
 ozali workspace --dry-run # solo muestra el inventario y el plan, sin escribir
+ozali workspace --yes     # no interactivo: acepta defaults y todas las referencias detectadas
 ozali workspace --depth 2 # busca repos hasta 2 niveles (para raíces con subcarpetas de grupo)
+ozali workspace --doctor  # health-check de TODOS los repos miembros + resumen (solo CLI)
+ozali workspace --update  # actualiza skills/permisos/jarvis de TODOS los repos miembros (solo CLI)
 ```
 
 Qué hace, en orden: (1) **escanea** los repos hijos y reporta su estado —`✔ listo`, `⚠ sin calibrar`
@@ -93,6 +96,13 @@ contigo; y (4) escribe la config para **trabajar en conjunto**:
 - `<carpeta>.code-workspace` — workspace multi-root que abre todos los repos juntos.
 - Orquestador **`ozali-workspace-jarvis`** en `CLAUDE.md`/`AGENTS.md` de la raíz: coordina los repos
   según el manifiesto y delega la ejecución en el `cdk` de cada uno.
+- La skill **`ozali`** en la raíz (`.claude/skills/ozali/`) para **calibrar los miembros desde el
+  workspace** (modo target), sin abrir cada proyecto.
+
+**Operar todo desde la raíz:** `ozali workspace --doctor` y `--update` corren el health-check y la
+actualización sobre **todos** los repos miembros (solo CLI). Y para calibrar los `⚠ sin calibrar`,
+abre el agente en la raíz y pídele a `ozali-workspace-jarvis` que *"calibre los repos pendientes"*: los
+recorre uno por uno (con su GATE) sin que cambies de proyecto.
 
 Es **idempotente**: re-córrelo cuando agregues repos o cambien las referencias. Detalle completo en
 [`docs/workspaces.md`](docs/workspaces.md).
@@ -152,6 +162,7 @@ Claude Code y opencode (perfiles de permisos para ambos en
 |---|---|
 | Guía de uso (usuarios generales) | [docs/guia-de-uso.md](docs/guia-de-uso.md) |
 | Uso previsto (modelo mental) | [docs/intended-usage.md](docs/intended-usage.md) |
+| Compilado y uso local (repo clonado) | [docs/compilado-local.md](docs/compilado-local.md) |
 | Seguridad del instalador (npx/pnpm) | [docs/security.md](docs/security.md) |
 | Histórico aislado y memoria de equipo | [docs/team-history.md](docs/team-history.md) |
 | Desplegar Engram Cloud (VPS) | [docs/deploy-cloud-vps.md](docs/deploy-cloud-vps.md) |

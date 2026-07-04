@@ -1,7 +1,7 @@
 // detect.mjs — detección read-only del entorno del proyecto destino.
 import fs from "node:fs";
 import path from "node:path";
-import { exists, which, gitInfo, nodeMajor, HOME, readJSON, projectName, DEFAULT_KNOWLEDGE } from "./util.mjs";
+import { exists, which, gitInfo, tryExec, nodeMajor, HOME, readJSON, projectName, DEFAULT_KNOWLEDGE } from "./util.mjs";
 
 /** Variante de fuente de verdad: {found, doc, dir, variant} */
 export function detectSourceOfTruth(cwd) {
@@ -122,8 +122,20 @@ function isKnowledgeRepo(dir) {
 }
 
 /**
+ * ¿`dir` es la RAÍZ de su propio repo git? No basta con estar dentro de un work tree
+ * (una subcarpeta de un repo también lo está): exigimos que el toplevel de git sea `dir`.
+ * Así, correr `ozali workspace` dentro de un repo NO trata sus subcarpetas como miembros.
+ */
+function isRepoRoot(dir) {
+  const top = tryExec("git", ["-C", dir, "rev-parse", "--show-toplevel"]);
+  if (!top) return false;
+  try { return fs.realpathSync(top) === fs.realpathSync(dir); } catch { return false; }
+}
+
+/**
  * Junta las rutas de repos git bajo `root` hasta `depth` niveles. Un directorio que
- * ES repo git se trata como hoja (no se desciende dentro). Salta ocultos/ignorados.
+ * ES la raíz de su propio repo git se trata como hoja (no se desciende dentro). Salta
+ * ocultos/ignorados.
  */
 function collectRepoDirs(root, depth, level = 1, acc = []) {
   let entries;
@@ -133,7 +145,7 @@ function collectRepoDirs(root, depth, level = 1, acc = []) {
     if (e.name.startsWith(".") || IGNORE_DIRS.has(e.name)) continue;
     const full = path.join(root, e.name);
     if (isKnowledgeRepo(full)) continue;
-    if (gitInfo(full).isRepo) { acc.push(full); continue; } // repo = hoja
+    if (isRepoRoot(full)) { acc.push(full); continue; } // repo propio = hoja
     if (level < depth) collectRepoDirs(full, depth, level + 1, acc);
   }
   return acc;

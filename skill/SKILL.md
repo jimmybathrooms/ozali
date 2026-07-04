@@ -26,6 +26,28 @@ produce documentación, la calibración, el plan y los artefactos de la skill `c
 
 ---
 
+## Modo workspace — calibrar un repo miembro (target)
+
+Normalmente `ozali` opera sobre el **repo actual** (cwd). Pero cuando te invocan desde la **raíz de un
+workspace** (existe `ozali-workspace.json`) para calibrar un **repo miembro**, operas sobre un
+**target de subcarpeta** en vez del cwd. En ese caso:
+
+- **Todas las rutas son relativas al `<target>`**, no a la raíz: la fuente de verdad
+  (`<target>/AI.md` + `<target>/.ai/`, o su variante `IA.md` + `.ia/`), la skill que generas
+  (`<target>/.claude/skills/cdk/`), el histórico (`<target>/.ozali/docs/`) y
+  `<target>/.engram/config.json`.
+- **Identidad git del miembro:** usa `git -C <target> …` (no la raíz).
+- **Engram:** guarda con el `project_name` de `<target>/.engram/config.json` (equivale al
+  `members[].project` del manifiesto). **No mezcles** memoria entre repos.
+- **Un target por corrida**, secuencial, con su **propio 🛑 GATE**. No calibres varios a la vez sin
+  aprobación.
+- Al terminar, sugiere **re-correr `ozali workspace`** en la raíz para refrescar el estado del miembro
+  en el manifiesto (`needs-calibration` → `ready`).
+
+Si te invocan sin target (uso normal en un solo repo), ignora esta sección y sigue con el cwd.
+
+---
+
 ## Flujo general (7 fases)
 
 ```

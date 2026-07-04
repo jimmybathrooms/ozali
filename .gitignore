@@ -11,6 +11,10 @@ npm-debug.log*
 pnpm-debug.log*
 .pnpm-store/
 
+# Empaquetado local para pruebas (npm pack) — ver docs/compilado-local.md
+ozali-*.tgz
+/package/
+
 # OS / editor
 .DS_Store
 *.log
