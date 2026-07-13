@@ -1,0 +1,12 @@
+{
+  "alwaysUpdateLinks": true,
+  "newFileLocation": "folder",
+  "newFileFolderPath": "Memoria",
+  "attachmentFolderPath": "Memoria",
+  "readableLineLength": true,
+  "strictLineBreaks": false,
+  "showLineNumber": false,
+  "spellcheck": false,
+  "tabSize": 2,
+  "useTab": false
+}

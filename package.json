@@ -1,6 +1,6 @@
 {
   "name": "ozali",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Bootstrap interactivo de IA por equipo: calibra el proyecto, genera la skill de ejecución (cdk) con TDD/SDD, y mantiene memoria de equipo (Engram) con histórico aislado.",
   "type": "module",
   "bin": {

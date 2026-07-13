@@ -47,6 +47,32 @@ export function detectEngram() {
   return { available: !!bin, bin: bin || null };
 }
 
+/** Detecta si Obsidian está instalado. Devuelve { installed, path } por SO. */
+export function detectObsidian() {
+  const plat = process.platform;
+  if (plat === "darwin") {
+    const appPaths = [
+      "/Applications/Obsidian.app",
+      path.join(HOME, "Applications", "Obsidian.app"),
+    ];
+    for (const p of appPaths) if (exists(p)) return { installed: true, path: p };
+    const bin = which("obsidian");
+    if (bin) return { installed: true, path: bin };
+  } else if (plat === "linux") {
+    const bin = which("obsidian");
+    if (bin) return { installed: true, path: bin };
+    const flatpak = path.join(HOME, ".var", "app", "md.obsidian.Obsidian");
+    if (exists(flatpak)) return { installed: true, path: flatpak };
+    const snap = "/snap/bin/obsidian";
+    if (exists(snap)) return { installed: true, path: snap };
+  } else if (plat === "win32") {
+    const localAppData = process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local");
+    const exe = path.join(localAppData, "Obsidian", "Obsidian.exe");
+    if (exists(exe)) return { installed: true, path: exe };
+  }
+  return { installed: false, path: null };
+}
+
 /** Metadatos compartibles de Engram Cloud del proyecto (sin secretos). */
 export function detectCloud(cwd) {
   const metaPath = path.join(cwd, ".ozali", "cloud.json");
@@ -105,6 +131,7 @@ export function detectAll(cwd) {
     agents: detectAgents(cwd),
     skill: detectInstalledSkill(cwd),
     engram: detectEngram(),
+    obsidian: detectObsidian(),
     cloud: detectCloud(cwd),
     testing: detectTesting(cwd),
   };

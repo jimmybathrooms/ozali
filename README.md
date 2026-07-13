@@ -167,6 +167,7 @@ Claude Code y opencode (perfiles de permisos para ambos en
 | Histórico aislado y memoria de equipo | [docs/team-history.md](docs/team-history.md) |
 | Desplegar Engram Cloud (VPS) | [docs/deploy-cloud-vps.md](docs/deploy-cloud-vps.md) |
 | Desplegar Engram Cloud (Google Cloud) | [docs/deploy-cloud-gcloud.md](docs/deploy-cloud-gcloud.md) |
+| Integración con Obsidian | [docs/obsidian-integration.md](docs/obsidian-integration.md) |
 | Skill bootstrap | [skill/SKILL.md](skill/SKILL.md) |
 | Calibración de testing + TDD | [skill/references/calibration-blueprint.md](skill/references/calibration-blueprint.md) |
 | Contrato y versión de `cdk` | [skill/references/cdk-contract.md](skill/references/cdk-contract.md) |

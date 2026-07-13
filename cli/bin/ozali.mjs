@@ -63,6 +63,7 @@ function parseArgs(argv) {
     else if (a === "--import") opts.import = true;
     else if (a === "--push") opts.push = true;
     else if (a === "--cloud") opts.cloud = true;
+    else if (a === "--obsidian") opts.obsidian = true;
     else if (a === "--no-engram") opts.noEngram = true;
     else if (a === "--no-trust") opts.noTrust = true;
     else if (a === "--no-jarvis") opts.noJarvis = true;
@@ -100,8 +101,8 @@ async function main() {
     case "init": return await init(cwd, opts);
     case "workspace": return await workspace(cwd, opts);
     case "doctor": return doctor(cwd);
-    case "update": return update(cwd, opts);
-    case "sync": return sync(cwd, opts);
+    case "update": return await update(cwd, opts);
+    case "sync": return await sync(cwd, opts);
     case "audit": return await audit(cwd, opts);
     case "cloud": return await cloud(cwd, opts);
     default:

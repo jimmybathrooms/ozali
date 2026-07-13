@@ -1,0 +1,11 @@
+# Ignorar settings personales de Obsidian
+.obsidian/workspace.json
+.obsidian/themes/
+.obsidian/snippets/
+.obsidian/plugins/**/data.json
+
+# Notas personales del dev (no compartidas)
+Daily/
+
+# Backups locales de Obsidian
+.obsidian/backups/

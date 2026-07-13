@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { engramAssetName, pickEngramAsset } from "../lib/util.mjs";
+import { engramAssetName, pickEngramAsset, toPortablePath, fromPortablePath } from "../lib/util.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.resolve(HERE, "..", "bin", "ozali.mjs");
@@ -381,6 +381,49 @@ test("engramAssetName respeta la convención de release por SO/arch", () => {
   assert.equal(engramAssetName("win32", "x64", "1.17.0"), "engram_1.17.0_windows_amd64.zip");
   assert.equal(engramAssetName("linux", "ia32", "1.17.0"), null, "arch no soportada → null");
   assert.equal(engramAssetName("freebsd", "x64", "1.17.0"), null, "SO no soportado → null");
+});
+
+test("toPortablePath convierte absolutos a ~ o relativo", () => {
+  const home = os.homedir();
+  const cwd = "/project";
+  assert.equal(toPortablePath(path.join(home, ".ozali", "knowledge"), cwd), "~/.ozali/knowledge");
+  assert.equal(toPortablePath("/project/.k", "/project"), ".k");
+  assert.equal(toPortablePath("/outside", "/project"), "/outside");
+});
+
+test("fromPortablePath expande ~ y resuelve relativos", () => {
+  const home = os.homedir();
+  const cwd = "/project";
+  assert.equal(fromPortablePath("~/.ozali/knowledge", cwd), path.join(home, ".ozali", "knowledge"));
+  assert.equal(fromPortablePath(".k", cwd), "/project/.k");
+  assert.equal(fromPortablePath("/abs", cwd), "/abs");
+});
+
+test("init guarda knowledgeRepo como path portable", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".ozali", "config.json"), "utf8"));
+    assert.ok(cfg.knowledgeRepo, "config tiene knowledgeRepo");
+    assert.ok(!path.isAbsolute(cfg.knowledgeRepo), "knowledgeRepo NO debe ser absoluto");
+    assert.equal(cfg.knowledgeRepo, ".k", "knowledgeRepo debe ser relativo al proyecto");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sync resuelve knowledgeRepo portable correctamente", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    // Crear algo en .ozali/docs/ para que sync tenga qué copiar
+    fs.mkdirSync(path.join(dir, ".ozali", "docs"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ozali", "docs", "test.md"), "# test\n");
+    const { stdout } = run(["sync", "--yes"], dir);
+    assert.match(stdout, /copiados|Docs copiados/, "sync debe encontrar el repo de conocimiento");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("pickEngramAsset ignora tags no-semver sin binarios (pi-v*) y draft/prerelease", () => {

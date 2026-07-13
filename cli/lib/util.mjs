@@ -193,5 +193,60 @@ export function nodeMajor() {
   return parseInt(process.versions.node.split(".")[0], 10);
 }
 
+// ---- rutas portables (cross-platform / cross-team) --------------------------
+
+/**
+ * Convierte un path absoluto a formato portable para guardar en config.json.
+ * Reglas (en orden de prioridad):
+ * 1. Si está bajo `os.homedir()`, reemplazar prefijo por `~`.
+ * 2. Si `base` (cwd del proyecto) está definido y el path está bajo `base`,
+ *    devolver relativo a `base`.
+ * 3. Dejar absoluto (legacy; emitir warning en el caller si es necesario).
+ */
+export function toPortablePath(absPath, base = null) {
+  if (!absPath) return absPath;
+  // Normalizar con realpath para resolver symlinks (macOS: /var → /private/var)
+  let normalized;
+  try { normalized = fs.realpathSync(absPath); } catch { normalized = path.resolve(absPath); }
+  const home = os.homedir();
+  // 1) home-relative → ~
+  if (home && (normalized === home || normalized.startsWith(home + path.sep))) {
+    return "~" + normalized.slice(home.length);
+  }
+  // 2) base-relative
+  if (base) {
+    let baseNorm;
+    try { baseNorm = fs.realpathSync(base); } catch { baseNorm = path.resolve(base); }
+    if (normalized.startsWith(baseNorm + path.sep)) {
+      return path.relative(baseNorm, normalized);
+    }
+  }
+  // 3) absoluto legacy
+  return normalized;
+}
+
+/**
+ * Expande un path portable a absoluto.
+ * Reglas:
+ * 1. Si empieza con `~`, expandir a `os.homedir()`.
+ * 2. Si es relativo, resolver contra `base` (cwd del proyecto).
+ * 3. Si ya es absoluto (legacy), devolver tal cual.
+ */
+export function fromPortablePath(portablePath, base = null) {
+  if (!portablePath) return portablePath;
+  // 1) expandir ~
+  if (portablePath.startsWith("~")) {
+    const home = os.homedir();
+    const rest = portablePath.slice(1);
+    return home + (rest.startsWith(path.sep) || rest === "" ? rest : path.sep + rest);
+  }
+  // 2) relativo → absoluto contra base
+  if (base && !path.isAbsolute(portablePath)) {
+    return path.resolve(base, portablePath);
+  }
+  // 3) absoluto legacy o ya resuelto
+  return path.resolve(portablePath);
+}
+
 export const HOME = os.homedir();
 export const DEFAULT_KNOWLEDGE = path.join(HOME, ".ozali", "knowledge");

@@ -7,6 +7,7 @@ import {
   SKILL_SRC, COMMIT_SKILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
+  toPortablePath, fromPortablePath,
 } from "./util.mjs";
 import { detectAll, detectWorkspace, detectReferences } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
@@ -115,7 +116,8 @@ export async function init(cwd, opts) {
   ], 0);
 
   // Repo de conocimiento (histórico aislado)
-  const knowledgeRepo = opts.knowledgeRepo || await ask("Ruta del repo de conocimiento (histórico aislado)", DEFAULT_KNOWLEDGE);
+  const knowledgeRepoRaw = opts.knowledgeRepo || await ask("Ruta del repo de conocimiento (histórico aislado)", DEFAULT_KNOWLEDGE);
+  const knowledgeRepo = fromPortablePath(knowledgeRepoRaw, cwd);
 
   // Engram
   let memoryMode = "docs";
@@ -124,6 +126,24 @@ export async function init(cwd, opts) {
   } else if (env.engram.available) {
     memoryMode = "hybrid";
     ok(`Engram disponible (${env.engram.bin}). Modo de memoria: ${c.bold("hybrid")} (docs + Engram).`);
+    // Verificar si hay versión nueva con cooldown de seguridad
+    const versionCheck = checkEngramVersion();
+    if (versionCheck && versionCheck.canUpgrade) {
+      warn(`Hay una nueva versión de Engram: ${c.bold(versionCheck.latest)} (tienes ${versionCheck.current}).`);
+      if (await confirm("¿Actualizar Engram ahora?", false)) {
+        info("Actualizando Engram…");
+        if (process.platform === "darwin" && which("brew")) {
+          spawnCmd("brew", ["upgrade", "gentleman-programming/tap/engram"]);
+        } else if (which("go")) {
+          spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
+        } else {
+          warn("No se puede auto-actualizar sin Homebrew (macOS) o Go. Descarga manual:");
+          info("  " + c.cyan(versionCheck.url));
+        }
+      }
+    } else if (versionCheck && versionCheck.cooldown) {
+      info(`Engram ${c.bold(versionCheck.latest)} está disponible pero aún en cooldown de seguridad (24h). Se activará el ${new Date(new Date(versionCheck.publishedAt).getTime() + 24*60*60*1000).toLocaleDateString()}.`);
+    }
   } else {
     warn("Engram no está instalado.");
     // --dry-run no instala; --yes usa el default (sí); interactivo pregunta.
@@ -153,6 +173,23 @@ export async function init(cwd, opts) {
       info("Modo " + c.bold("docs") + " activo. Cuando instales Engram, corre " + c.bold("ozali doctor") + " para activar hybrid.");
       printEngramManualInstructions(agent);
     }
+  }
+
+  // Obsidian (opt-in) — ofrecer instalación si no detectado
+  if (!env.obsidian.installed) {
+    warn("Obsidian no detectado. Es el visualizador recomendado para el vault de conocimiento.");
+    if (!opts.dryRun) {
+      const installObsidian = opts.yes ? false : await confirm("¿Abrir la página de descarga de Obsidian?", false);
+      if (installObsidian) {
+        const url = process.platform === "darwin" ? "https://obsidian.md/download"
+          : process.platform === "win32" ? "https://obsidian.md/download"
+          : "https://obsidian.md/download";
+        openURL(url);
+        info("Descarga e instala Obsidian, luego corre " + c.bold("ozali sync --obsidian") + " para generar el vault.");
+      }
+    }
+  } else {
+    ok(`Obsidian detectado (${c.dim(env.obsidian.path)}).`);
   }
 
   // Engram Cloud (opt-in) — réplica de equipo además del git-sync. Solo si Engram quedó disponible.
@@ -220,7 +257,9 @@ export async function init(cwd, opts) {
 
   // 5) config local (gitignored)
   const config = {
-    version: pkgVersion(), agent, scope, knowledgeRepo, memoryMode, cloud,
+    version: pkgVersion(), agent, scope,
+    knowledgeRepo: toPortablePath(knowledgeRepo, cwd),
+    memoryMode, cloud,
     project: projectName(cwd), createdAt: new Date().toISOString(),
   };
   writeJSON(CONFIG_PATH(cwd), config);
@@ -241,6 +280,53 @@ export async function init(cwd, opts) {
   console.log(`  2. Escribe ${c.bold('"diagnostica el proyecto"')} o ${c.bold('"ozali"')} para arrancar el bootstrap (calibración + generación de la skill ${c.bold("cdk")}).`);
   console.log(`  3. Tras trabajar, corre ${c.bold("ozali sync")} para llevar el histórico al repo de conocimiento.`);
   console.log(`  ${c.dim("Salud en cualquier momento:")} ${c.bold("ozali doctor")}`);
+  return 0;
+}
+
+/**
+ * Consulta la API de releases de Engram y compara con la versión instalada.
+ * Si hay una versión estable más reciente cuyo release tenga >24h de antigüedad,
+ * advierte al usuario y ofrece upgrade. Si la versión nueva tiene <24h, ignora
+ * (cooldown de seguridad contra supply-chain attacks).
+ * Devuelve { current, latest, url, canUpgrade } o null si no hay info.
+ */
+function checkEngramVersion() {
+  const currentRaw = tryExec("engram", ["version"]);
+  if (!currentRaw) return null;
+  const current = currentRaw.trim().replace(/^engram\s+/, "");
+  const raw = fetchText(ENGRAM_RELEASES_LIST);
+  if (!raw) return null;
+  let releases;
+  try { releases = JSON.parse(raw); } catch { return null; }
+  if (!Array.isArray(releases)) return null;
+  const now = Date.now();
+  const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  for (const r of releases) {
+    if (!r || r.draft || r.prerelease) continue;
+    const m = /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name || "");
+    if (!m) continue;
+    const latest = m[1];
+    if (compareSemver(latest, current) <= 0) break; // no hay nada más nuevo
+    const published = r.published_at ? new Date(r.published_at).getTime() : 0;
+    if (!published || now - published < COOLDOWN_MS) {
+      // Versión muy reciente — mostrar como disponible pero con cooldown activo
+      return { current, latest, url: r.html_url, canUpgrade: false, cooldown: true, publishedAt: r.published_at };
+    }
+    // Versión estable con cooldown cumplido
+    const asset = pickEngramAsset([r], process.platform, process.arch);
+    return { current, latest, url: asset ? asset.url : r.html_url, canUpgrade: true, cooldown: false, publishedAt: r.published_at };
+  }
+  return { current, latest: current, canUpgrade: false };
+}
+
+/** Comparación semver simple: devuelve >0 si a>b, <0 si a<b, 0 si iguales. */
+function compareSemver(a, b) {
+  const pa = a.split(".").map((n) => parseInt(n, 10));
+  const pb = b.split(".").map((n) => parseInt(n, 10));
+  for (let i = 0; i < 3; i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na !== nb) return na - nb;
+  }
   return 0;
 }
 
@@ -795,7 +881,7 @@ export async function workspace(cwd, opts = {}) {
 
   // Modos batch (Track 1): operan sobre los miembros del workspace ya existente y salen.
   if (opts.wsDoctor) return workspaceDoctor(ws.members);
-  if (opts.wsUpdate) return workspaceUpdate(ws.members, opts);
+  if (opts.wsUpdate) return await workspaceUpdate(ws.members, opts);
 
   // Fase B — remediación de los que no tienen ozali init
   const missing = ws.members.filter((m) => m.status === "missing-init");
@@ -807,7 +893,7 @@ export async function workspace(cwd, opts = {}) {
     const shared = {
       agent: opts.agent || (base && base.agent),
       scope: opts.scope || (base && base.scope),
-      knowledgeRepo: opts.knowledgeRepo || (base && base.knowledgeRepo),
+      knowledgeRepo: fromPortablePath(opts.knowledgeRepo || (base && base.knowledgeRepo), root),
     };
     for (const m of missing) {
       const go = opts.yes ? true : await confirm(`¿Correr ${c.bold("ozali init")} en ${c.bold(m.dir)}?`, true);
@@ -888,7 +974,7 @@ function workspaceDoctor(members) {
 }
 
 /** Track 1 — update de todos los miembros ozali (skills/permisos/jarvis) + resumen. */
-function workspaceUpdate(members, opts) {
+async function workspaceUpdate(members, opts) {
   const results = [];
   let failed = 0;
   for (const m of members) {
@@ -899,7 +985,7 @@ function workspaceUpdate(members, opts) {
       results.push({ dir: m.dir, mark: c.yellow("—"), note: "sin init (saltado)" });
       continue;
     }
-    const code = update(m.path, opts);
+    const code = await update(m.path, opts);
     if (code !== 0) failed++;
     results.push({ dir: m.dir, mark: code === 0 ? c.green("✔") : c.yellow("✖"), note: code === 0 ? "actualizado" : "revisar" });
   }
@@ -956,7 +1042,10 @@ function writeWorkspaceManifest(root, members, references, opts) {
     version: pkgVersion(),
     root,
     agent,
-    knowledgeRepo: opts.knowledgeRepo || existing.knowledgeRepo || base.knowledgeRepo || DEFAULT_KNOWLEDGE,
+    knowledgeRepo: toPortablePath(
+      opts.knowledgeRepo || existing.knowledgeRepo || base.knowledgeRepo || DEFAULT_KNOWLEDGE,
+      root
+    ),
     cloud: base.cloud || existing.cloud || { enabled: false },
     members: members.map((m) => ({ path: m.dir, project: m.project, status: m.status, sot: m.sot.found ? m.sot.variant : null })),
     references: references.map((e) => ({ from: e.fromDir, to: e.toDir, kind: e.kind })),
@@ -1056,7 +1145,9 @@ export function doctor(cwd) {
        cloudMeta && cloudMeta.dashboard ? c.cyan(cloudMeta.dashboard) : ""].filter(Boolean).join(" · ")
     : "off (opt-in, git-sync activo)";
   add("Engram Cloud", true, cloudDetail);
-  add("Repo de conocimiento", !!(cfg && cfg.knowledgeRepo && exists(cfg.knowledgeRepo)), cfg ? cfg.knowledgeRepo : "sin configurar (ozali init)");
+  const kRepoPortable = cfg && cfg.knowledgeRepo;
+  const kRepoResolved = kRepoPortable ? fromPortablePath(kRepoPortable, cwd) : null;
+  add("Repo de conocimiento", !!(kRepoResolved && exists(kRepoResolved)), kRepoResolved || "sin configurar (ozali init)");
 
   // Strict TDD (de la fuente de verdad)
   const tdd = readStrictTdd(cwd, env.sot);
@@ -1166,7 +1257,7 @@ function readStrictTdd(cwd, sot) {
 // references), los perfiles de permisos y **crea/refresca ozali-jarvis** (clave para repos
 // inicializados antes de 0.4.0). La skill `cdk` la regenera el AGENTE (no el CLI): se detecta
 // y se guía la regeneración.
-export function update(cwd, opts = {}) {
+export async function update(cwd, opts = {}) {
   step("ozali update — actualizar la instalación al paquete actual");
   const env = detectAll(cwd);
   const cfgPath = CONFIG_PATH(cwd);
@@ -1232,6 +1323,37 @@ export function update(cwd, opts = {}) {
     info("cdk aún no generada en este repo. Corre la skill " + c.bold("ozali") + " en tu agente para crearla.");
   }
 
+  // 4.5) Engram version check (cooldown 24h)
+  if (env.engram.available) {
+    const versionCheck = checkEngramVersion();
+    if (versionCheck && versionCheck.canUpgrade) {
+      warn(`Hay una nueva versión de Engram: ${c.bold(versionCheck.latest)} (tienes ${versionCheck.current}).`);
+      if (await confirm("¿Actualizar Engram ahora?", false)) {
+        info("Actualizando Engram…");
+        if (process.platform === "darwin" && which("brew")) {
+          spawnCmd("brew", ["upgrade", "gentleman-programming/tap/engram"]);
+        } else if (which("go")) {
+          spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
+        } else {
+          warn("No se puede auto-actualizar sin Homebrew (macOS) o Go. Descarga manual:");
+          info("  " + c.cyan(versionCheck.url));
+        }
+      }
+    } else if (versionCheck && versionCheck.cooldown) {
+      info(`Engram ${c.bold(versionCheck.latest)} está disponible pero aún en cooldown de seguridad (24h). Se activará el ${new Date(new Date(versionCheck.publishedAt).getTime() + 24*60*60*1000).toLocaleDateString()}.`);
+    }
+  }
+
+  // 4.6) Obsidian check
+  if (!env.obsidian.installed) {
+    warn("Obsidian no detectado. Es el visualizador recomendado para el vault de conocimiento.");
+    const installObsidian = opts.yes ? false : await confirm("¿Abrir la página de descarga de Obsidian?", false);
+    if (installObsidian) {
+      openURL("https://obsidian.md/download");
+      info("Descarga e instala Obsidian, luego corre " + c.bold("ozali sync --obsidian") + " para generar el vault.");
+    }
+  }
+
   // 5) versión del config
   if (cfg) { cfg.version = pkgVersion(); cfg.updatedAt = new Date().toISOString(); writeJSON(cfgPath, cfg); }
   ok(`Instalación al día con ozali v${pkgVersion()}.`);
@@ -1274,11 +1396,11 @@ function cdkCanonicalVersion() {
 }
 
 // ============================================================= sync ===========
-export function sync(cwd, opts) {
+export async function sync(cwd, opts) {
   step(`ozali sync${opts.import ? " --import" : ""}${opts.cloud ? " --cloud" : ""} — histórico ↔ repo de conocimiento`);
   const cfg = readJSON(CONFIG_PATH(cwd));
   if (!cfg || !cfg.knowledgeRepo) { warn("Sin repo de conocimiento configurado. Corre " + c.bold("ozali init") + "."); return 1; }
-  const kRepo = cfg.knowledgeRepo;
+  const kRepo = fromPortablePath(cfg.knowledgeRepo, cwd);
   if (!exists(kRepo)) { err(`El repo de conocimiento no existe: ${kRepo}`); return 1; }
   const project = cfg.project || projectName(cwd);
   const projDir = path.join(kRepo, "projects", project);
@@ -1383,6 +1505,16 @@ export function sync(cwd, opts) {
   if (exists(docsLocal)) { copyDir(docsLocal, path.join(projDir, "docs")); ok(`Docs copiados a projects/${project}/docs/.`); }
   else info("No hay .ozali/docs/ que sincronizar todavía.");
 
+  // 2.5) Obsidian vault export
+  const vaultPath = path.join(kRepo, "obsidian");
+  if (opts.obsidian) {
+    await exportObsidianVault(kRepo, project, vaultPath);
+  } else if (exists(vaultPath) && !opts.yes) {
+    if (await confirm("¿Exportar memoria a Obsidian vault?", true)) {
+      await exportObsidianVault(kRepo, project, vaultPath);
+    }
+  }
+
   // 3) commit (push solo si hay remoto)
   if (exists(path.join(kRepo, ".git"))) {
     tryExec("git", ["add", "-A"], { cwd: kRepo });
@@ -1398,6 +1530,57 @@ export function sync(cwd, opts) {
     }
   }
   return 0;
+}
+
+/**
+ * Exporta la memoria de Engram a un vault de Obsidian compatible.
+ * 1) Copia templates base si no existen.
+ * 2) Genera MOCs dinámicos (proyectos) desde knowledgeRepo/projects/.
+ * 3) Ejecuta `engram obsidian-export`.
+ */
+async function exportObsidianVault(kRepo, project, vaultPath) {
+  if (!tryExec("engram", ["--version"])) {
+    warn("Engram no está disponible. No se puede exportar a Obsidian.");
+    return;
+  }
+  ensureDir(vaultPath);
+  // 1) Templates base
+  const templateDir = path.join(TEMPLATES_SRC, "obsidian-vault");
+  if (exists(templateDir)) {
+    for (const entry of fs.readdirSync(templateDir, { withFileTypes: true })) {
+      const src = path.join(templateDir, entry.name);
+      const dst = path.join(vaultPath, entry.name);
+      if (entry.isDirectory()) {
+        if (!exists(dst)) copyDir(src, dst);
+      } else if (!exists(dst)) {
+        fs.copyFileSync(src, dst);
+      }
+    }
+  }
+  // 2) MOC dinámico — Proyectos
+  const projectsDir = path.join(kRepo, "projects");
+  const projectsMoc = path.join(vaultPath, "MOCs", "Proyectos.md");
+  if (exists(projectsDir)) {
+    const projects = [];
+    for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) projects.push(entry.name);
+    }
+    const list = projects.map((p) => `- [[${p}]] — proyecto activo`).join("\n");
+    const body = fs.readFileSync(projectsMoc, "utf8");
+    const updated = body.replace(
+      /<!-- PROJECTS_START -->[\s\S]*?<!-- PROJECTS_END -->/,
+      `<!-- PROJECTS_START -->\n${list || "- Sin proyectos activos todavía."}\n<!-- PROJECTS_END -->`
+    );
+    fs.writeFileSync(projectsMoc, updated);
+  }
+  // 3) Export Engram
+  info("Exportando memoria a Obsidian vault…");
+  const out = tryExec("engram", ["obsidian-export", "--vault", vaultPath, "--project", project, "--graph-config", "preserve"]);
+  if (out !== null) {
+    ok("Obsidian vault actualizado.");
+  } else {
+    warn("engram obsidian-export falló. Revisa que el vault esté cerrado en Obsidian.");
+  }
 }
 
 // ============================================================ audit ===========
