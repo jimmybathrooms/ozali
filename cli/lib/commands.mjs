@@ -1395,6 +1395,83 @@ function cdkCanonicalVersion() {
   }
 }
 
+// =========================================================== install-engram ===
+export async function installEngramCmd(cwd, opts) {
+  step("ozali install-engram — instalar o reparar Engram bajo demanda");
+  const env = detectAll(cwd);
+  const cfg = readJSON(CONFIG_PATH(cwd));
+  let needsInstall = !env.engram.available;
+
+  if (env.engram.available) {
+    const online = tryExec("engram", ["doctor"], { cwd }) !== null;
+    if (online && !opts.force) {
+      ok(`Engram ya está instalado y responde (${env.engram.bin}).`);
+      info("Usa --force si quieres forzar una reinstalación.");
+    } else if (online && opts.force) {
+      warn("Forzando reinstalación de Engram (--force)…");
+      needsInstall = true;
+    } else {
+      warn("Engram está en PATH pero no responde (engram doctor falló). Reinstalando…");
+      needsInstall = true;
+    }
+  }
+
+  if (needsInstall) {
+    if (opts.dryRun) {
+      info("(dry-run) Aquí instalaría Engram.");
+      return 0;
+    }
+    const installed = installEngram();
+    if (!installed) {
+      warn("No se pudo instalar Engram automáticamente.");
+      printEngramManualInstructions(cfg?.agent || "both");
+      return 1;
+    }
+  }
+
+  // Configurar agente MCP
+  let agent = opts.agent || (cfg && cfg.agent);
+  if (!agent && !opts.yes) {
+    agent = await select("¿Para qué agente configuro Engram?", [
+      { value: "claude-code", label: "Claude Code" },
+      { value: "opencode", label: "opencode" },
+      { value: "both", label: "Ambos" },
+    ], 2);
+  } else if (!agent) {
+    agent = "both";
+  }
+
+  if (agent === "claude-code" || agent === "both") {
+    info("Registrando MCP en Claude Code…");
+    spawnCmd("engram", ["setup", "claude-code"]);
+  }
+  if (agent === "opencode" || agent === "both") {
+    info("Registrando MCP en opencode…");
+    spawnCmd("engram", ["setup", "opencode"]);
+  }
+
+  // Actualizar config de ozali si existe
+  if (cfg) {
+    let wrote = false;
+    if (cfg.memoryMode === "docs") {
+      cfg.memoryMode = "hybrid";
+      wrote = true;
+      ok("Modo de memoria actualizado a " + c.bold("hybrid") + " en .ozali/config.json.");
+    }
+    if (!cfg.agent) {
+      cfg.agent = agent;
+      wrote = true;
+    }
+    if (wrote) writeJSON(CONFIG_PATH(cwd), cfg);
+  } else {
+    warn("No hay configuración de ozali en esta ruta (corre " + c.bold("ozali init") + " para completar el setup).");
+    info("Engram quedó instalado; solo falta el config de ozali para integrarlo al flujo.");
+  }
+
+  ok("Engram listo. Reinicia tu agente para que cargue el servidor MCP de Engram.");
+  return 0;
+}
+
 // ============================================================= sync ===========
 export async function sync(cwd, opts) {
   step(`ozali sync${opts.import ? " --import" : ""}${opts.cloud ? " --cloud" : ""} — histórico ↔ repo de conocimiento`);

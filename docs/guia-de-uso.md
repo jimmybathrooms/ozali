@@ -81,11 +81,11 @@ Lleva el histórico y la memoria al repo de conocimiento del equipo. Tus compañ
 | Comando | Qué hace |
 |---|---|
 | `ozali init` | Prepara el proyecto (lo corres una vez por repo). |
+| `ozali install-engram` | Instala (o reinstala) Engram y registra su MCP cuando saltaste la instalación en `init`. |
 | `ozali workspace` | Configura varios repos de una carpeta para trabajar en conjunto (lo corres en la carpeta raíz). |
 | `ozali doctor` | Revisa que todo esté bien. Es solo lectura, no cambia nada. |
 | `ozali update` | Actualiza skill ozali + ozali-jarvis + permisos (y guía cómo regenerar cdk). |
 | `ozali sync` | Sube el histórico/memoria al repo de equipo. |
-| `ozali sync --import` | Baja lo que el equipo ya guardó. |
 | `ozali audit` | Navega/audita la memoria de Engram (qué se ha hecho). |
 
 ¿Algo no funciona? Corre **`ozali doctor`** primero: te dice qué falta y cómo arreglarlo.
@@ -146,8 +146,8 @@ no puede, te deja las instrucciones. Con Engram, tu agente **recuerda** decision
 convenciones — y los recupera en futuras sesiones.
 
 ¿No quieres Engram ahora? Pasa `--no-engram` y ozali arranca en modo `docs` (la memoria se queda en
-documentos legibles). Cuando quieras activarlo, instálalo y corre `ozali doctor`: el modo sube a
-`hybrid` solo.
+documentos legibles). Cuando quieras activarlo, corre `ozali install-engram` — lo instala, configura
+el MCP en tu agente y sube el modo a `hybrid` de una vez.
 
 Dos detalles si lo usas en equipo:
 

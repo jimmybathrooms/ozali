@@ -137,7 +137,8 @@ interactivo te pregunta (default sí), y con `--yes` lo instala automáticamente
 descarga el **binario precompilado** correcto según tu arquitectura (amd64/arm64) a `~/.local/bin`
 (sin sudo); en **macOS** usa brew → `go install` con el binario como fallback; en **Windows**
 usa `go install`. Si algún paso falla, imprime instrucciones específicas de tu SO. Si prefieres no
-instalarlo, pasa `--no-engram` (arranca en modo `docs`). Opcionalmente habilita **Engram Cloud**
+instalarlo, pasa `--no-engram` (arranca en modo `docs`). Más tarde puedes instalarlo con
+`ozali install-engram` bajo demanda. Opcionalmente habilita **Engram Cloud**
 (réplica de equipo opt-in) además del git-sync.
 
 `init` también crea **ozali-jarvis**, un **orquestador always-on**: persona en `CLAUDE.md`/`AGENTS.md`

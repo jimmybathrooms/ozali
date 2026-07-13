@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync, audit, cloud, workspace } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -14,6 +14,9 @@ ${c.bold("Uso:")}
 ${c.bold("Comandos:")}
   init      Detecta el agente (Claude Code/opencode), instala las skills ozali y
             ozali-commit, aísla el histórico, configura Engram y el repo de conocimiento.
+  install-engram
+            Instala (o reinstala) Engram bajo demanda, registra su MCP en el agente
+            y activa modo hybrid. Úsalo cuando saltaste la instalación en init.
   workspace Multi-repo: escanea los repos de la carpeta raíz, remedia los que no tienen
             ozali init, guía la calibración y escribe la config para trabajar en conjunto.
             Con --doctor / --update opera sobre TODOS los repos miembros desde la raíz.
@@ -64,6 +67,7 @@ function parseArgs(argv) {
     else if (a === "--push") opts.push = true;
     else if (a === "--cloud") opts.cloud = true;
     else if (a === "--obsidian") opts.obsidian = true;
+    else if (a === "--force") opts.force = true;
     else if (a === "--no-engram") opts.noEngram = true;
     else if (a === "--no-trust") opts.noTrust = true;
     else if (a === "--no-jarvis") opts.noJarvis = true;
@@ -105,6 +109,7 @@ async function main() {
     case "sync": return await sync(cwd, opts);
     case "audit": return await audit(cwd, opts);
     case "cloud": return await cloud(cwd, opts);
+    case "install-engram": return await installEngramCmd(cwd, opts);
     default:
       err(`comando desconocido "${cmd}". Usa ${c.bold("ozali --help")}.`);
       return 1;
