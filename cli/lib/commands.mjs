@@ -35,11 +35,8 @@ function skillGeneratorTarget(cwd, scope) {
 }
 
 // --- opencode paths (skills.sh spec: .opencode/skills/ project, ~/.config/opencode/skills/ global) ---
-function skillTargetOpencode(cwd, scope) {
-  const base = scope === "global" ? path.join(process.env.HOME || "", ".config", "opencode") : path.join(cwd, ".opencode");
-  return path.join(base, "skills", "ozali");
-}
-
+// Nota: ozali (bootstrap) no se instala localmente en opencode; el global es suficiente.
+// Solo las skills de ejecución (ozali-commit, skill-generator) van local.
 function commitSkillTargetOpencode(cwd, scope) {
   const base = scope === "global" ? path.join(process.env.HOME || "", ".config", "opencode") : path.join(cwd, ".opencode");
   return path.join(base, "skills", "ozali-commit");
@@ -282,13 +279,11 @@ export async function init(cwd, opts) {
   copyDir(SKILL_GENERATOR_SRC, generatorTarget);
   ok(`Skill ${c.bold("skill-generator")} instalada en ${c.bold(path.relative(cwd, generatorTarget) || generatorTarget)}.`);
 
-  // 1b) Instalar en opencode si el agente lo requiere
+  // 1b) Instalar skills de ejecución en opencode si el agente lo requiere
+  // Nota: ozali (bootstrap) no se instala localmente en opencode; el global es suficiente.
   if (agent === "opencode" || agent === "both") {
-    const ocTarget = skillTargetOpencode(cwd, scope);
-    ensureDir(path.dirname(ocTarget));
-    copyDir(SKILL_SRC, ocTarget);
-    ok(`Skill instalada en opencode: ${c.bold(path.relative(cwd, ocTarget) || ocTarget)}.`);
     const ocCommit = commitSkillTargetOpencode(cwd, scope);
+    ensureDir(path.dirname(ocCommit));
     copyDir(COMMIT_SKILL_SRC, ocCommit);
     ok(`Skill ${c.bold("ozali-commit")} instalada en opencode: ${c.bold(path.relative(cwd, ocCommit) || ocCommit)}.`);
     const ocGen = skillGeneratorTargetOpencode(cwd, scope);
@@ -1411,13 +1406,11 @@ export async function update(cwd, opts = {}) {
     : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
   const scope = (cfg && cfg.scope) || "project";
 
-  // 1b) Actualizar en opencode si el agente lo requiere
+  // 1b) Actualizar skills de ejecución en opencode si el agente lo requiere
+  // Nota: ozali (bootstrap) no se instala localmente en opencode; el global es suficiente.
   if (agent === "opencode" || agent === "both") {
-    const ocTarget = skillTargetOpencode(cwd, scope);
-    ensureDir(path.dirname(ocTarget));
-    copyDir(SKILL_SRC, ocTarget);
-    ok(`Skill ozali actualizada en opencode: ${path.relative(cwd, ocTarget) || ocTarget} → v${pkgVersion()}`);
     const ocCommit = commitSkillTargetOpencode(cwd, scope);
+    ensureDir(path.dirname(ocCommit));
     const freshOcCommit = !exists(ocCommit);
     copyDir(COMMIT_SKILL_SRC, ocCommit);
     ok(`Skill ozali-commit ${freshOcCommit ? "instalada" : "actualizada"} en opencode: ${path.relative(cwd, ocCommit) || ocCommit}`);
