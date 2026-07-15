@@ -14,7 +14,7 @@ const PKG_ROOT = path.resolve(HERE, "..", "..");
 
 function run(args, cwd, expectFail = false) {
   try {
-    const stdout = execFileSync(process.execPath, [BIN, ...args], { cwd, encoding: "utf8" });
+    const stdout = execFileSync(process.execPath, [BIN, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     return { code: 0, stdout };
   } catch (e) {
     if (!expectFail) throw e;
@@ -154,14 +154,25 @@ test("init instala la skill ozali-commit", () => {
   }
 });
 
+test("init instala la skill skill-generator", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "skill-generator", "SKILL.md")), "skill-generator SKILL.md instalada");
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "skill-generator", "references", "skill-creation-blueprint.md")), "skill-generator references instaladas");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 1\n---\n# cdk\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 2\n---\n# cdk\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
-    assert.match(stdout, /contrato v1 \(al día\)/, "doctor marca cdk al día");
+    assert.match(stdout, /contrato v2 \(al día\)/, "doctor marca cdk al día");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -171,7 +182,7 @@ test("doctor marca cdk desactualizada si referencia copsis-commit", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 1\n---\n# cdk\ninvoca copsis-commit al cierre del hito\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 2\n---\n# cdk\ninvoca copsis-commit al cierre del hito\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /copsis-commit/, "doctor avisa de copsis-commit");
   } finally {

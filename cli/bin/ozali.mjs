@@ -35,10 +35,12 @@ ${c.bold("Opciones comunes:")}
   --depth <n>          (workspace) Niveles a escanear bajo la raíz (default 1).
   --doctor             (workspace) Health-check de TODOS los repos miembros + resumen.
   --update             (workspace) Actualiza (skills/permisos/jarvis) TODOS los repos miembros.
-  --knowledge-repo <p> (init) Ruta del repo de conocimiento.
-  --no-engram          (init) No usar Engram; arranca en modo docs.
-  --no-trust           (init) No marcar el workspace como confiable en Claude Code.
-  --no-jarvis          (init/update) No crear/refrescar el orquestador ozali-jarvis.
+   --knowledge-repo <p> (init) Ruta del repo de conocimiento.
+   --knowledge-only     (init) Solo configura el repo de conocimiento (sin skills/agents/Engram).
+   --no-engram          (init) No usar Engram; arranca en modo docs.
+   --no-trust           (init) No marcar el workspace como confiable en Claude Code.
+   --no-jarvis          (init/update) No crear/refrescar el orquestador ozali-jarvis.
+   --fix                (doctor) Auto-remedia problemas detectados (repo de conocimiento, TDD…).
   --import             (sync) Importa del repo de conocimiento a local.
   --push               (sync) Hace push al remoto del repo de conocimiento.
   --cloud              (sync) Replica también a Engram Cloud (si está habilitado).
@@ -84,6 +86,8 @@ function parseArgs(argv) {
     else if (a === "--doctor") opts.wsDoctor = true;
     else if (a === "--update") opts.wsUpdate = true;
     else if (a === "--knowledge-repo") opts.knowledgeRepo = argv[++i];
+    else if (a === "--knowledge-only") opts.knowledgeOnly = true;
+    else if (a === "--fix") opts.fix = true;
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "-v" || a === "--version") opts.version = true;
     else opts._.push(a);
@@ -104,7 +108,7 @@ async function main() {
   switch (cmd) {
     case "init": return await init(cwd, opts);
     case "workspace": return await workspace(cwd, opts);
-    case "doctor": return doctor(cwd);
+    case "doctor": return await doctor(cwd, opts);
     case "update": return await update(cwd, opts);
     case "sync": return await sync(cwd, opts);
     case "audit": return await audit(cwd, opts);

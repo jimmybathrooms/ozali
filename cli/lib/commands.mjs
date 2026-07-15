@@ -4,12 +4,12 @@ import path from "node:path";
 import os from "node:os";
 import {
   c, ok, warn, err, info, step,
-  SKILL_SRC, COMMIT_SKILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
+  SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
   toPortablePath, fromPortablePath,
 } from "./util.mjs";
-import { detectAll, detectWorkspace, detectReferences } from "./detect.mjs";
+import { detectAll, detectSourceOfTruth, detectWorkspace, detectReferences } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
 
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
@@ -27,6 +27,11 @@ function skillTarget(cwd, scope) {
 function commitSkillTarget(cwd, scope) {
   const base = scope === "global" ? path.join(process.env.HOME || "", ".claude") : path.join(cwd, ".claude");
   return path.join(base, "skills", "ozali-commit");
+}
+
+function skillGeneratorTarget(cwd, scope) {
+  const base = scope === "global" ? path.join(process.env.HOME || "", ".claude") : path.join(cwd, ".claude");
+  return path.join(base, "skills", "skill-generator");
 }
 
 function readTeamCloud(cwd) {
@@ -89,8 +94,49 @@ function cloudStatusSnapshot(cwd, project) {
 }
 
 // ============================================================ init ===========
+
+/**
+ * Inicializa (o reconfigura) únicamente el repo de conocimiento y el config mínimo.
+ * Reutilizable por `init --knowledge-only`, `doctor --fix`, etc.
+ */
+async function initKnowledgeRepo(cwd, opts, extraConfig = {}, explicitRepo = null) {
+  const knowledgeRepoRaw = explicitRepo || opts.knowledgeRepo || await ask("Ruta del repo de conocimiento (histórico aislado)", DEFAULT_KNOWLEDGE);
+  const knowledgeRepo = fromPortablePath(knowledgeRepoRaw, cwd);
+
+  ensureDir(knowledgeRepo);
+  if (!exists(path.join(knowledgeRepo, ".git"))) {
+    if (await confirm(`¿Inicializo git en el repo de conocimiento (${knowledgeRepo})?`, true)) {
+      tryExec("git", ["init", "-q"], { cwd: knowledgeRepo });
+      ensureDir(path.join(knowledgeRepo, "projects"));
+      ensureDir(path.join(knowledgeRepo, "engram"));
+      ok("Repo de conocimiento inicializado.");
+    }
+  } else info("Repo de conocimiento ya existe.");
+
+  const existing = readJSON(CONFIG_PATH(cwd)) || {};
+  const config = {
+    version: pkgVersion(),
+    knowledgeRepo: toPortablePath(knowledgeRepo, cwd),
+    project: projectName(cwd),
+    createdAt: existing.createdAt || new Date().toISOString(),
+    ...extraConfig,
+  };
+  writeJSON(CONFIG_PATH(cwd), config);
+  ok(`Config local escrita en ${c.bold(".ozali/config.json")} (repo de conocimiento configurado).`);
+  return config;
+}
+
 export async function init(cwd, opts) {
   step("ozali init — bootstrap del proyecto");
+
+  // Track rápido: solo repo de conocimiento, sin agents/skills/Engram
+  if (opts.knowledgeOnly) {
+    step("ozali init --knowledge-only");
+    await initKnowledgeRepo(cwd, opts);
+    info(`Siguientes pasos: corre ${c.bold("ozali init")} (sin --knowledge-only) para completar skills, agentes y Engram.`);
+    return 0;
+  }
+
   const env = detectAll(cwd);
 
   if (!env.node.ok) warn(`Node ${env.node.version} detectado; ozali y el harness piden ≥16. Continúo, pero actualiza si ves errores.`);
@@ -208,7 +254,7 @@ export async function init(cwd, opts) {
 
   // --- acciones ---
   step("Aplicando");
-  // 1) copiar skill ozali (bootstrap) + ozali-commit (commit convencional)
+  // 1) copiar skill ozali (bootstrap) + ozali-commit (commit convencional) + skill-generator
   const target = skillTarget(cwd, scope);
   ensureDir(path.dirname(target));
   copyDir(SKILL_SRC, target);
@@ -216,6 +262,9 @@ export async function init(cwd, opts) {
   const commitTarget = commitSkillTarget(cwd, scope);
   copyDir(COMMIT_SKILL_SRC, commitTarget);
   ok(`Skill ${c.bold("ozali-commit")} instalada en ${c.bold(path.relative(cwd, commitTarget) || commitTarget)}.`);
+  const generatorTarget = skillGeneratorTarget(cwd, scope);
+  copyDir(SKILL_GENERATOR_SRC, generatorTarget);
+  ok(`Skill ${c.bold("skill-generator")} instalada en ${c.bold(path.relative(cwd, generatorTarget) || generatorTarget)}.`);
 
   // 2) perfiles base de permisos (idempotentes, merge mínimo) por agente
   if (agent === "claude-code" || agent === "both") {
@@ -244,26 +293,14 @@ export async function init(cwd, opts) {
     else info(".gitignore ya aislaba el histórico.");
   }
 
-  // 4) repo de conocimiento
-  ensureDir(knowledgeRepo);
-  if (!exists(path.join(knowledgeRepo, ".git"))) {
-    if (await confirm(`¿Inicializo git en el repo de conocimiento (${knowledgeRepo})?`, true)) {
-      tryExec("git", ["init", "-q"], { cwd: knowledgeRepo });
-      ensureDir(path.join(knowledgeRepo, "projects"));
-      ensureDir(path.join(knowledgeRepo, "engram"));
-      ok("Repo de conocimiento inicializado.");
-    }
-  } else info("Repo de conocimiento ya existe.");
+  // 4-5) repo de conocimiento + config local (reutiliza helper)
+  const config = await initKnowledgeRepo(cwd, opts, { agent, scope, memoryMode, cloud }, knowledgeRepoRaw);
 
-  // 5) config local (gitignored)
-  const config = {
-    version: pkgVersion(), agent, scope,
-    knowledgeRepo: toPortablePath(knowledgeRepo, cwd),
-    memoryMode, cloud,
-    project: projectName(cwd), createdAt: new Date().toISOString(),
-  };
-  writeJSON(CONFIG_PATH(cwd), config);
-  ok(`Config local escrita en ${c.bold(".ozali/config.json")} (gitignored).`);
+  // 6) Obsidian vault (init) — si Obsidian está instalado, inicializar el vault base
+  if (env.obsidian.installed && !opts.dryRun) {
+    const kRepo = fromPortablePath(config.knowledgeRepo, cwd);
+    await initObsidianVault(kRepo, opts);
+  }
 
   // --- siguientes pasos ---
   step("Siguientes pasos");
@@ -880,7 +917,7 @@ export async function workspace(cwd, opts = {}) {
   printMembers(ws.members);
 
   // Modos batch (Track 1): operan sobre los miembros del workspace ya existente y salen.
-  if (opts.wsDoctor) return workspaceDoctor(ws.members);
+  if (opts.wsDoctor) return await workspaceDoctor(ws.members, opts);
   if (opts.wsUpdate) return await workspaceUpdate(ws.members, opts);
 
   // Fase B — remediación de los que no tienen ozali init
@@ -952,7 +989,7 @@ export async function workspace(cwd, opts = {}) {
 }
 
 /** Track 1 — health-check de todos los miembros (doctor por repo) + resumen consolidado. */
-function workspaceDoctor(members) {
+async function workspaceDoctor(members, opts = {}) {
   const results = [];
   for (const m of members) {
     console.log("");
@@ -962,7 +999,7 @@ function workspaceDoctor(members) {
       results.push({ dir: m.dir, ok: false, note: "sin init" });
       continue;
     }
-    const code = doctor(m.path);
+    const code = await doctor(m.path, opts);
     results.push({ dir: m.dir, ok: code === 0, note: code === 0 ? "todo en orden" : "puntos a atender" });
   }
   step("Resumen del workspace");
@@ -1104,7 +1141,7 @@ function ensureWorkspaceJarvisOpencode(root) {
 }
 
 // =========================================================== doctor ==========
-export function doctor(cwd) {
+export async function doctor(cwd, opts = {}) {
   step("ozali doctor — health-check (read-only)");
   const env = detectAll(cwd);
   const cfg = readJSON(CONFIG_PATH(cwd));
@@ -1115,6 +1152,7 @@ export function doctor(cwd) {
   add("Node ≥ 16", env.node.ok, env.node.version);
   add("Fuente de verdad", env.sot.found, env.sot.found ? `${env.sot.doc} + ${env.sot.dir}/` : "ausente (corre la skill 'ozali')");
   add("Skill ozali instalada", env.skill.installed, env.skill.installed ? env.skill.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
+  add("Skill skill-generator", env.skillGenerator.installed, env.skillGenerator.installed ? env.skillGenerator.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   // Skill cdk (la genera el agente): versión de contrato vs. la vigente del paquete.
   const cdkInfo = detectCdk(cwd);
   const cdkN = cdkCanonicalVersion();
@@ -1166,6 +1204,53 @@ export function doctor(cwd) {
   console.log("");
   if (bad === 0) ok("Todo en orden. ozali está listo para trabajar.");
   else warn(`${bad} punto(s) a atender. Revisa los ✖ de arriba.`);
+
+  // --fix: auto-remediar problemas detectables
+  if (opts.fix && bad > 0) {
+    step("Modo --fix: remediando problemas detectados");
+
+    // Fix 1: Repo de conocimiento
+    const kRepoRow = rows.find((r) => r.label === "Repo de conocimiento");
+    if (kRepoRow && !kRepoRow.good) {
+      await initKnowledgeRepo(cwd, opts);
+      kRepoRow.good = true;
+      kRepoRow.detail = fromPortablePath(readJSON(CONFIG_PATH(cwd)).knowledgeRepo, cwd);
+    }
+
+    // Fix 2: Strict TDD
+    const tddRow = rows.find((r) => r.label === "Strict TDD calibrado");
+    if (tddRow && !tddRow.good && env.testing.runners.length > 0) {
+      const calibrate = opts.yes ? true : await confirm(`Detecté runner(s) ${env.testing.runners.join(", ")}. ¿Calibrar strict_tdd: true?`, true);
+      if (calibrate) {
+        const sot = env.sot.found ? env.sot : detectSourceOfTruth(cwd);
+        if (!sot.found) {
+          warn("No hay fuente de verdad (.ai/ o .ia/). No puedo calibrar TDD sin ella.");
+        } else {
+          const f = path.join(cwd, sot.dir, "context", "tech-stack.md");
+          ensureDir(path.dirname(f));
+          let txt = exists(f) ? fs.readFileSync(f, "utf8") : "# Tech Stack\n\n";
+          if (!/Testing\s*&\s*TDD/i.test(txt)) {
+            txt += "\n\n## Testing & TDD\n\n";
+          }
+          if (/Strict\s*TDD[:*\s]+(true|false)/i.test(txt)) {
+            txt = txt.replace(/Strict\s*TDD[:*\s]+(true|false)/i, "Strict TDD: true");
+          } else {
+            txt += "\nStrict TDD: true\n";
+          }
+          fs.writeFileSync(f, txt);
+          ok(`Strict TDD calibrado a ${c.bold("true")} en ${path.relative(cwd, f)}.`);
+          tddRow.good = true;
+          tddRow.detail = "strict_tdd: true";
+        }
+      }
+    }
+
+    const badAfterFix = rows.filter((r) => !r.good).length;
+    console.log("");
+    if (badAfterFix === 0) ok("Todos los problemas detectados fueron remediados.");
+    else warn(`${badAfterFix} punto(s) aún sin remediar.`);
+    return badAfterFix === 0 ? 0 : 1;
+  }
 
   // Auto-upgrade: si Engram acaba de instalarse y el config aún dice "docs", subir a hybrid.
   if (cfg && cfg.memoryMode === "docs" && env.engram.available) {
@@ -1268,7 +1353,7 @@ export async function update(cwd, opts = {}) {
   }
 
   // 1) Skill ozali (incluye las references: la base desde la que el agente regenera cdk)
-  //    + ozali-commit (commit convencional) como skill hermana — la crea en repos previos.
+  //    + ozali-commit (commit convencional) + skill-generator como skills hermanas.
   if (env.skill.installed) {
     for (const p of env.skill.paths) {
       copyDir(SKILL_SRC, p);
@@ -1277,6 +1362,10 @@ export async function update(cwd, opts = {}) {
       const freshCommit = !exists(commitDir);
       copyDir(COMMIT_SKILL_SRC, commitDir);
       ok(`Skill ozali-commit ${freshCommit ? "instalada" : "actualizada"}: ${path.relative(cwd, commitDir) || commitDir}`);
+      const generatorDir = path.join(path.dirname(p), "skill-generator");
+      const freshGenerator = !exists(generatorDir);
+      copyDir(SKILL_GENERATOR_SRC, generatorDir);
+      ok(`Skill skill-generator ${freshGenerator ? "instalada" : "actualizada"}: ${path.relative(cwd, generatorDir) || generatorDir}`);
     }
   } else {
     warn("Skill ozali no instalada en esta ruta (corre " + c.bold("ozali init") + " para instalarla).");
@@ -1607,6 +1696,37 @@ export async function sync(cwd, opts) {
     }
   }
   return 0;
+}
+
+/**
+ * Inicializa la estructura base del vault de Obsidian en el repo de conocimiento.
+ * Copia templates desde `templates/obsidian-vault/` si el vault aún no existe.
+ * No requiere Engram (a diferencia de exportObsidianVault).
+ */
+async function initObsidianVault(kRepo, opts = {}) {
+  const vaultPath = path.join(kRepo, "obsidian");
+  if (exists(vaultPath)) {
+    info(`Vault de Obsidian ya existe en ${path.relative(kRepo, vaultPath)}.`);
+    return;
+  }
+  ensureDir(vaultPath);
+  const templateDir = path.join(TEMPLATES_SRC, "obsidian-vault");
+  if (exists(templateDir)) {
+    copyDir(templateDir, vaultPath);
+    ok(`Vault de Obsidian inicializado en ${c.bold(path.relative(kRepo, vaultPath) || "obsidian")}.`);
+    info(`Para abrirlo: abre Obsidian → "Open folder as vault" → seleccioná "${vaultPath}".`);
+    if (opts.yes) {
+      info(`Usá ${c.bold("ozali sync --obsidian")} para regenerar los MOCs cuando tengas proyectos.`);
+    } else {
+      const openNow = opts.yes ? false : await confirm("¿Abrir el vault en Obsidian ahora?", false);
+      if (openNow) {
+        openURL("obsidian://open?path=" + encodeURIComponent(vaultPath));
+        info("Si Obsidian no se abrió automáticamente, abrilo manualmente y seleccioná el vault.");
+      }
+    }
+  } else {
+    warn("Templates de Obsidian no encontrados en el paquete. Vault no inicializado.");
+  }
 }
 
 /**

@@ -41,6 +41,16 @@ export function detectInstalledSkill(cwd) {
   return { installed: found.length > 0, paths: found };
 }
 
+/** ¿Está instalada la skill skill-generator? Devuelve rutas encontradas. */
+export function detectInstalledSkillGenerator(cwd) {
+  const candidates = [
+    path.join(cwd, ".claude", "skills", "skill-generator"),
+    path.join(HOME, ".claude", "skills", "skill-generator"),
+  ];
+  const found = candidates.filter((p) => exists(path.join(p, "SKILL.md")));
+  return { installed: found.length > 0, paths: found };
+}
+
 /** Engram disponible (binario CLI en PATH). El MCP no se puede sondear desde aquí. */
 export function detectEngram() {
   const bin = which("engram");
@@ -130,6 +140,7 @@ export function detectAll(cwd) {
     sot: detectSourceOfTruth(cwd),
     agents: detectAgents(cwd),
     skill: detectInstalledSkill(cwd),
+    skillGenerator: detectInstalledSkillGenerator(cwd),
     engram: detectEngram(),
     obsidian: detectObsidian(),
     cloud: detectCloud(cwd),

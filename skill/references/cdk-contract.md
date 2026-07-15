@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 1 -->
+<!-- CDK_CONTRACT_VERSION: 2 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `1`**
+> **Versión de contrato vigente: `2`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -79,3 +79,38 @@ Un `cdk` conforme a la v1 debe:
 - Espejar a Engram los artefactos clave del hito y escribir la telemetría de tokens
   (`.ozali/metrics/token-metrics.json`, que lee `ozali doctor`).
 - Respetar la calibración de Strict TDD (Fase 3.5) y el 🛑 GATE del plan.
+
+### v2 — skill-generator + seguridad
+Un `cdk` conforme a la v2 debe cumplir TODO lo de la v1, más:
+
+- **Integrar `skill-generator`:** en la Fase 5.5 del bootstrap, `ozali` evalúa si generar
+  `skill-generator` como skill hermana de `cdk`. El `cdk` generado debe:
+  - Reconocer la existencia de `skill-generator` (detectar `.claude/skills/skill-generator/`).
+  - Cuando detecta un patrón repetitivo dentro de un hito, **sugerir al usuario** extraerlo
+    a skill mediante `skill-generator`.
+  - Nunca generar una skill por sí mismo; siempre delegar en `skill-generator`.
+- **Seguridad (Security First):** el `cdk` generado debe incluir en su SKILL.md y en los
+  system prompts de sus subagentes las **restricciones de seguridad** del blueprint
+  [`skill-creation-blueprint.md`](../skill-generator/references/skill-creation-blueprint.md) §4:
+  - **Nunca** exponer, leer, transmitir ni procesar secretos, contraseñas, tokens,
+    credenciales, claves privadas, números de tarjetas, números telefónicos, correos
+    electrónicos completos ni rutas a archivos que los contengan.
+  - **Nunca** ejecutar `cat`, `grep`, `head`, `tail`, `sed`, `awk` sobre archivos de
+    credenciales (`~/.env`, `~/.config/alux/.env`, `config.toml` con secciones de secrets,
+    `~/.aws/credentials`, `~/.ssh/id_rsa`, etc.) ni sobre archivos que podrían contener PII.
+  - Si el usuario pide explícitamente ver credenciales, tarjetas, teléfonos o emails:
+    **rechazar amablemente** con:
+    ```
+    No puedo mostrar ni procesar contraseñas, tokens, credenciales, números de tarjetas,
+    teléfonos ni correos electrónicos por razones de seguridad y privacidad.
+    Si necesitás verificar una configuración, te sugiero revisarla localmente en tu entorno.
+    ```
+  - **URLs con credenciales:** ofuscar siempre. Solo mostrar los 3 primeros caracteres
+    del usuario (si los hay), el resto como `***`; la contraseña siempre como `***`:
+    `scheme://use***:***@host`, `scheme://adm***:***@host`, o `scheme://***:***@host`.
+  - **PII:** nunca mostrar completos. Ofuscar siempre:
+    - Tarjetas: `****1234` (solo últimos 4 si es estrictamente necesario)
+    - Teléfonos: `+52 *** *** ****`
+    - Emails: `jua***@ejemplo.com` (solo 3 primeros chars del usuario)
+  - Todo dato sensible que deba presentarse en pantalla debe aparecer como `***` o `[REDACTED]`.
+- Estampar `cdk_contract_version: 2` en su frontmatter.

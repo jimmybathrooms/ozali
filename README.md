@@ -175,15 +175,6 @@ Claude Code y opencode (perfiles de permisos para ambos en
 | Blueprint de agentes | [skill/references/agents-blueprint.md](skill/references/agents-blueprint.md) |
 | Memoria híbrida (docs + Engram) | [skill/references/engram-convention.md](skill/references/engram-convention.md) |
 
-## Estado del roadmap
-
-- [x] **Fase A** — Calibración + Strict TDD en el bootstrap.
-- [x] **Fase B** — Memoria híbrida (docs + Engram, `state` recuperable, contrato de arranque).
-- [x] **Fase C** — CLI plug-n-play (`init`/`doctor`/`update`/`sync`), Node cero-deps.
-- [x] **Fase D** — Repo distribuible: tests (node:test), CI (matriz Node 16–22 + invariantes de seguridad), publicación npm con provenance.
-
-> Siguiente paso natural: crear el repo en GitHub y publicar la primera versión (`pnpm publish` vía tag), más probar el bootstrap en un repo real del equipo.
-
 > Linaje: `ozali` se nutre de conceptos de
 > [gentle-ai](https://github.com/Gentleman-Programming/gentle-ai) (Engram, calibración SDD/TDD,
 > distribución plug-n-play).

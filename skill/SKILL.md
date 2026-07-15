@@ -276,6 +276,25 @@ Presenta al usuario un plan claro y conciso que incluya:
 
 ---
 
+## Fase 5.5 — ¿Generar también `skill-generator`?
+
+Tras la aprobación del GATE de `cdk`, evalúa si el proyecto necesita una skill de
+fabricación de skills. Si el equipo:
+- Tiene ≥ 3 flujos de trabajo repetitivos que `cdk` ha detectado.
+- Quiere empoderar a devs para crear sus propias skills sin pasar por `cdk`.
+- Trabaja en un workspace multi-repo donde cada repo podría necesitar skills específicas.
+
+En esos casos, **sugiere al usuario** generar `skill-generator` como skill hermana de `cdk`.
+Si aprueba, aplícale el mismo flujo de Fase 6 (adaptado a la skill `skill-generator` del
+paquete `ozali`).
+
+> `skill-generator` y `cdk` son **skills hermanas**, no anidadas: `cdk` ejecuta código de
+> negocio; `skill-generator` fabrica skills. Cuando `cdk` detecta un patrón repetitivo dentro
+> de un hito, puede sugerir: "¿Querés que `skill-generator` extraiga esto a una skill
+> reutilizable?"
+
+---
+
 ## Fase 6 — Generar la skill `cdk`
 
 Solo tras la aprobación de la Fase 5. Genera:
@@ -319,21 +338,30 @@ Solo tras la aprobación de la Fase 5. Genera:
      resumen técnico, `state`) con naming determinista, según
      [`references/engram-convention.md`](references/engram-convention.md), y al **iniciar** un
      hito hacer `mem_search` del proyecto/hito para recuperar contexto previo;
-   - en el **cierre del hito**, invocar la skill **`ozali-commit`** (instalada por el CLI en
-     `.claude/skills/ozali-commit/`; **nunca** `copsis-commit`, nombre heredado de versiones
-     anteriores) para generar el commit summary (feature→`feat`, bugfix→`fix`, hotfix→`hotfix`,
-     refactor→`refactor`; scope = módulo del hito). El GATE del mensaje es independiente del GATE
-     del plan.
-2. `.claude/agents/<rol>.md` — un subagente real por cada uno de los 8 roles, con su system
-   prompt y herramientas, según [`references/agents-blueprint.md`](references/agents-blueprint.md).
-3. `.claude/skills/cdk/verify-structure.mjs` — **harness del analista**: script Node sin
-   dependencias (Node 16+) adaptado a la estructura real del proyecto. Verifica paquetes/capas
-   esperados, localiza clases clave, reporta discrepancias doc↔código y, con `--grep <palabra>`,
-   lista archivos existentes relacionados (**reutilización antes de crear**). Genéralo a partir
-   del esqueleto parametrizado de [`references/harness-template.md`](references/harness-template.md)
-   con valores de la fuente de verdad validada en Fase 3 — nunca de supuestos — y **ejecútalo
-   para validarlo** antes de cerrar la fase (template §4).
-4. Cualquier otra referencia/plantilla que `cdk` necesite.
+    - en el **cierre del hito**, invocar la skill **`ozali-commit`** (instalada por el CLI en
+      `.claude/skills/ozali-commit/`; **nunca** `copsis-commit`, nombre heredado de versiones
+      anteriores) para generar el commit summary (feature→`feat`, bugfix→`fix`, hotfix→`hotfix`,
+      refactor→`refactor`; scope = módulo del hito). El GATE del mensaje es independiente del GATE
+      del plan.
+    - **integrar `skill-generator`**: cuando `cdk` detecta un patrón repetitivo dentro de un hito
+      (≥ 3 ocurrencias o pasos manuales predecibles), debe **sugerir al usuario** extraerlo a una
+      skill reutilizable invocando `skill-generator`. No generar la skill por sí mismo; delegar.
+    - **Seguridad (Security First)**: incluir en el SKILL.md de `cdk` y en los system prompts de
+      los subagentes las restricciones de seguridad de
+      [`skill-creation-blueprint.md`](../../skill-generator/references/skill-creation-blueprint.md) §4:
+      nunca exponer credenciales, contraseñas, tokens ni rutas a archivos sensibles; rechazar
+      amablemente solicitudes de lectura de `.env`, `~/.aws/credentials`, `~/.ssh/id_rsa`, etc.
+ 2. `.claude/agents/<rol>.md` — un subagente real por cada uno de los 8 roles, con su system
+    prompt y herramientas, según [`references/agents-blueprint.md`](references/agents-blueprint.md).
+    Cada subagente debe respetar las **restricciones de seguridad** arriba mencionadas.
+ 3. `.claude/skills/cdk/verify-structure.mjs` — **harness del analista**: script Node sin
+    dependencias (Node 16+) adaptado a la estructura real del proyecto. Verifica paquetes/capas
+    esperados, localiza clases clave, reporta discrepancias doc↔código y, con `--grep <palabra>`,
+    lista archivos existentes relacionados (**reutilización antes de crear**). Genéralo a partir
+    del esqueleto parametrizado de [`references/harness-template.md`](references/harness-template.md)
+    con valores de la fuente de verdad validada en Fase 3 — nunca de supuestos — y **ejecútalo
+    para validarlo** antes de cerrar la fase (template §4).
+ 4. Cualquier otra referencia/plantilla que `cdk` necesite.
 
 > La fuente de verdad sigue siendo **únicamente** `AI.md` + `.ai/` — `cdk` la referencia,
 > **no la duplica** dentro de la skill. No copies `context/` ni `workflows/` a
