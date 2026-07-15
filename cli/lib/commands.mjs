@@ -34,6 +34,22 @@ function skillGeneratorTarget(cwd, scope) {
   return path.join(base, "skills", "skill-generator");
 }
 
+// --- opencode paths (skills.sh spec: .opencode/skills/ project, ~/.config/opencode/skills/ global) ---
+function skillTargetOpencode(cwd, scope) {
+  const base = scope === "global" ? path.join(process.env.HOME || "", ".config", "opencode") : path.join(cwd, ".opencode");
+  return path.join(base, "skills", "ozali");
+}
+
+function commitSkillTargetOpencode(cwd, scope) {
+  const base = scope === "global" ? path.join(process.env.HOME || "", ".config", "opencode") : path.join(cwd, ".opencode");
+  return path.join(base, "skills", "ozali-commit");
+}
+
+function skillGeneratorTargetOpencode(cwd, scope) {
+  const base = scope === "global" ? path.join(process.env.HOME || "", ".config", "opencode") : path.join(cwd, ".opencode");
+  return path.join(base, "skills", "skill-generator");
+}
+
 function readTeamCloud(cwd) {
   return readJSON(TEAM_CLOUD_PATH(cwd));
 }
@@ -266,9 +282,23 @@ export async function init(cwd, opts) {
   copyDir(SKILL_GENERATOR_SRC, generatorTarget);
   ok(`Skill ${c.bold("skill-generator")} instalada en ${c.bold(path.relative(cwd, generatorTarget) || generatorTarget)}.`);
 
+  // 1b) Instalar en opencode si el agente lo requiere
+  if (agent === "opencode" || agent === "both") {
+    const ocTarget = skillTargetOpencode(cwd, scope);
+    ensureDir(path.dirname(ocTarget));
+    copyDir(SKILL_SRC, ocTarget);
+    ok(`Skill instalada en opencode: ${c.bold(path.relative(cwd, ocTarget) || ocTarget)}.`);
+    const ocCommit = commitSkillTargetOpencode(cwd, scope);
+    copyDir(COMMIT_SKILL_SRC, ocCommit);
+    ok(`Skill ${c.bold("ozali-commit")} instalada en opencode: ${c.bold(path.relative(cwd, ocCommit) || ocCommit)}.`);
+    const ocGen = skillGeneratorTargetOpencode(cwd, scope);
+    copyDir(SKILL_GENERATOR_SRC, ocGen);
+    ok(`Skill ${c.bold("skill-generator")} instalada en opencode: ${c.bold(path.relative(cwd, ocGen) || ocGen)}.`);
+  }
+
   // 1.5) Migrar skills heredadas (copsis-* → ozali-*)
   if (!opts.dryRun) {
-    await migrateLegacySkills(cwd, opts);
+    await migrateLegacySkills(cwd, opts, agent, scope);
   }
 
   // 2) perfiles base de permisos (idempotentes, merge mínimo) por agente
@@ -1376,13 +1406,29 @@ export async function update(cwd, opts = {}) {
     warn("Skill ozali no instalada en esta ruta (corre " + c.bold("ozali init") + " para instalarla).");
   }
 
-  // 1.5) Migrar skills heredadas locales (copsis-* → ozali-*)
-  await migrateLegacySkills(cwd, opts);
-
   // Agente/scope: del config; si falta, infiere del entorno.
   const agent = (cfg && cfg.agent) || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
     : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
   const scope = (cfg && cfg.scope) || "project";
+
+  // 1b) Actualizar en opencode si el agente lo requiere
+  if (agent === "opencode" || agent === "both") {
+    const ocTarget = skillTargetOpencode(cwd, scope);
+    ensureDir(path.dirname(ocTarget));
+    copyDir(SKILL_SRC, ocTarget);
+    ok(`Skill ozali actualizada en opencode: ${path.relative(cwd, ocTarget) || ocTarget} → v${pkgVersion()}`);
+    const ocCommit = commitSkillTargetOpencode(cwd, scope);
+    const freshOcCommit = !exists(ocCommit);
+    copyDir(COMMIT_SKILL_SRC, ocCommit);
+    ok(`Skill ozali-commit ${freshOcCommit ? "instalada" : "actualizada"} en opencode: ${path.relative(cwd, ocCommit) || ocCommit}`);
+    const ocGen = skillGeneratorTargetOpencode(cwd, scope);
+    const freshOcGen = !exists(ocGen);
+    copyDir(SKILL_GENERATOR_SRC, ocGen);
+    ok(`Skill skill-generator ${freshOcGen ? "instalada" : "actualizada"} en opencode: ${path.relative(cwd, ocGen) || ocGen}`);
+  }
+
+  // 1.5) Migrar skills heredadas locales (copsis-* → ozali-*)
+  await migrateLegacySkills(cwd, opts, agent, scope);
 
   // 2) Perfiles base de permisos (idempotente: recoge defaults nuevos del paquete)
   if (agent === "claude-code" || agent === "both") ensureClaudeCodeProfile(cwd, scope);
@@ -1464,7 +1510,7 @@ export async function update(cwd, opts = {}) {
  * Si ozali-commit o skill-generator no están en local pero hay heredadas locales,
  * los instala en el proyecto.
  */
-async function migrateLegacySkills(cwd, opts = {}) {
+async function migrateLegacySkills(cwd, opts = {}, agent = "claude-code", scope = "project") {
   const { detectLegacySkills } = await import("./detect.mjs");
   const legacy = detectLegacySkills(cwd);
   if (legacy.length === 0) return;
@@ -1480,6 +1526,14 @@ async function migrateLegacySkills(cwd, opts = {}) {
         info(`Migrando ${c.bold(item.name)} → ${c.bold("ozali-commit")}.`);
         copyDir(COMMIT_SKILL_SRC, target);
         ok(`Skill ${c.bold("ozali-commit")} instalada en ${c.bold(path.relative(cwd, target) || target)}.`);
+      }
+      // También en opencode si aplica
+      if (agent === "opencode" || agent === "both") {
+        const ocTarget = commitSkillTargetOpencode(cwd, scope);
+        if (!exists(ocTarget)) {
+          copyDir(COMMIT_SKILL_SRC, ocTarget);
+          ok(`Skill ${c.bold("ozali-commit")} instalada en opencode: ${c.bold(path.relative(cwd, ocTarget) || ocTarget)}.`);
+        }
       }
       // Eliminar heredada
       try {
@@ -1506,14 +1560,12 @@ async function migrateLegacySkills(cwd, opts = {}) {
     copyDir(SKILL_GENERATOR_SRC, localGenerator);
     ok(`Skill ${c.bold("skill-generator")} instalada en ${c.bold(path.relative(cwd, localGenerator) || localGenerator)}.`);
   }
-
-  // Si hay heredadas locales pero ozali no está local, ofrecer instalarlo localmente
-  const localOzali = path.join(cwd, ".claude", "skills", "ozali");
-  if (!exists(localOzali) && !opts.yes) {
-    const installLocal = await confirm("¿Instalar la skill ozali (bootstrap) localmente en este proyecto?", true);
-    if (installLocal) {
-      copyDir(SKILL_SRC, localOzali);
-      ok(`Skill ${c.bold("ozali")} instalada localmente.`);
+  // También en opencode si aplica
+  if (agent === "opencode" || agent === "both") {
+    const ocGen = skillGeneratorTargetOpencode(cwd, scope);
+    if (!exists(ocGen)) {
+      copyDir(SKILL_GENERATOR_SRC, ocGen);
+      ok(`Skill ${c.bold("skill-generator")} instalada en opencode: ${c.bold(path.relative(cwd, ocGen) || ocGen)}.`);
     }
   }
 }
