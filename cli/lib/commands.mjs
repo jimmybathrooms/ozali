@@ -266,6 +266,11 @@ export async function init(cwd, opts) {
   copyDir(SKILL_GENERATOR_SRC, generatorTarget);
   ok(`Skill ${c.bold("skill-generator")} instalada en ${c.bold(path.relative(cwd, generatorTarget) || generatorTarget)}.`);
 
+  // 1.5) Migrar skills heredadas (copsis-* → ozali-*)
+  if (!opts.dryRun) {
+    await migrateLegacySkills(cwd, opts);
+  }
+
   // 2) perfiles base de permisos (idempotentes, merge mínimo) por agente
   if (agent === "claude-code" || agent === "both") {
     ensureClaudeCodeProfile(cwd, scope);
@@ -1371,6 +1376,9 @@ export async function update(cwd, opts = {}) {
     warn("Skill ozali no instalada en esta ruta (corre " + c.bold("ozali init") + " para instalarla).");
   }
 
+  // 1.5) Migrar skills heredadas locales (copsis-* → ozali-*)
+  await migrateLegacySkills(cwd, opts);
+
   // Agente/scope: del config; si falta, infiere del entorno.
   const agent = (cfg && cfg.agent) || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
     : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
@@ -1447,6 +1455,67 @@ export async function update(cwd, opts = {}) {
   if (cfg) { cfg.version = pkgVersion(); cfg.updatedAt = new Date().toISOString(); writeJSON(cfgPath, cfg); }
   ok(`Instalación al día con ozali v${pkgVersion()}.`);
   return 0;
+}
+
+/**
+ * Migra skills heredadas de versiones anteriores (copsis-* → ozali-*).
+ * - copsis-commit/ → ozali-commit/ (reemplaza contenido con la skill vigente)
+ * - copsis-doctor/ → eliminada (reemplazada por CLI `ozali doctor` + skill `ozali`)
+ * Si ozali-commit o skill-generator no están en local pero hay heredadas locales,
+ * los instala en el proyecto.
+ */
+async function migrateLegacySkills(cwd, opts = {}) {
+  const { detectLegacySkills } = await import("./detect.mjs");
+  const legacy = detectLegacySkills(cwd);
+  if (legacy.length === 0) return;
+
+  step("Migrando skills heredadas");
+  for (const item of legacy) {
+    if (item.name === "copsis-commit") {
+      const target = path.join(cwd, ".claude", "skills", "ozali-commit");
+      // Si ya existe ozali-commit, solo eliminamos la heredada
+      if (exists(target)) {
+        info(`Skill ${c.bold("ozali-commit")} ya existe; eliminando heredada ${c.bold(item.name)}.`);
+      } else {
+        info(`Migrando ${c.bold(item.name)} → ${c.bold("ozali-commit")}.`);
+        copyDir(COMMIT_SKILL_SRC, target);
+        ok(`Skill ${c.bold("ozali-commit")} instalada en ${c.bold(path.relative(cwd, target) || target)}.`);
+      }
+      // Eliminar heredada
+      try {
+        fs.rmSync(item.path, { recursive: true, force: true });
+        ok(`Heredada ${c.bold(item.name)} eliminada.`);
+      } catch (e) {
+        warn(`No pude eliminar ${item.path}: ${e.message}`);
+      }
+    } else if (item.name === "copsis-doctor") {
+      info(`Eliminando heredada ${c.bold(item.name)} (reemplazada por CLI ${c.bold("ozali doctor")} + skill ${c.bold("ozali")}).`);
+      try {
+        fs.rmSync(item.path, { recursive: true, force: true });
+        ok(`Heredada ${c.bold(item.name)} eliminada.`);
+      } catch (e) {
+        warn(`No pude eliminar ${item.path}: ${e.message}`);
+      }
+    }
+  }
+
+  // Si hay heredadas locales, asegurar que skill-generator también esté local
+  const localGenerator = path.join(cwd, ".claude", "skills", "skill-generator");
+  if (!exists(localGenerator)) {
+    info(`Instalando skill ${c.bold("skill-generator")} localmente (detectadas heredadas en el proyecto).`);
+    copyDir(SKILL_GENERATOR_SRC, localGenerator);
+    ok(`Skill ${c.bold("skill-generator")} instalada en ${c.bold(path.relative(cwd, localGenerator) || localGenerator)}.`);
+  }
+
+  // Si hay heredadas locales pero ozali no está local, ofrecer instalarlo localmente
+  const localOzali = path.join(cwd, ".claude", "skills", "ozali");
+  if (!exists(localOzali) && !opts.yes) {
+    const installLocal = await confirm("¿Instalar la skill ozali (bootstrap) localmente en este proyecto?", true);
+    if (installLocal) {
+      copyDir(SKILL_SRC, localOzali);
+      ok(`Skill ${c.bold("ozali")} instalada localmente.`);
+    }
+  }
 }
 
 /**

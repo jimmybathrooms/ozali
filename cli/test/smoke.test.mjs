@@ -165,6 +165,26 @@ test("init instala la skill skill-generator", () => {
   }
 });
 
+test("init migra skills heredadas copsis-* a ozali-*", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    // Simular skills heredadas
+    fs.mkdirSync(path.join(dir, ".claude", "skills", "copsis-commit"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".claude", "skills", "copsis-commit", "SKILL.md"), "# copsis-commit\n");
+    fs.mkdirSync(path.join(dir, ".claude", "skills", "copsis-doctor"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".claude", "skills", "copsis-doctor", "SKILL.md"), "# copsis-doctor\n");
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    // Verificar migración
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "copsis-commit")), "copsis-commit eliminado");
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "copsis-doctor")), "copsis-doctor eliminado");
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "ozali-commit", "SKILL.md")), "ozali-commit instalado");
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "skill-generator", "SKILL.md")), "skill-generator instalado localmente");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
   const dir = tmpProject();
   try {

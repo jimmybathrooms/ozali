@@ -281,3 +281,13 @@ export function detectReferences(members) {
   }
   return edges;
 }
+
+/** Detecta skills heredadas de versiones anteriores (copsis-*). */
+export function detectLegacySkills(cwd) {
+  const legacy = [];
+  const copsisCommit = path.join(cwd, ".claude", "skills", "copsis-commit");
+  const copsisDoctor = path.join(cwd, ".claude", "skills", "copsis-doctor");
+  if (exists(copsisCommit)) legacy.push({ name: "copsis-commit", path: copsisCommit, target: "ozali-commit" });
+  if (exists(copsisDoctor)) legacy.push({ name: "copsis-doctor", path: copsisDoctor, target: null });
+  return legacy;
+}
