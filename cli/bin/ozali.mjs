@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, dashboard } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -26,6 +26,8 @@ ${c.bold("Comandos:")}
   sync      Sincroniza el histórico (docs + Engram) con el repo de conocimiento.
   audit     Navega/audita la memoria de Engram del proyecto (o general).
   cloud     Gestiona Engram Cloud: status, upgrade, repair, dashboard, config.
+  dashboard Genera un resumen agregado de todos los hitos CDK documentados
+            (.ozali/dashboard.md) con métricas de uso y telemetría.
 
 ${c.bold("Opciones comunes:")}
   --yes, -y            No interactivo: usa defaults.
@@ -113,6 +115,7 @@ async function main() {
     case "sync": return await sync(cwd, opts);
     case "audit": return await audit(cwd, opts);
     case "cloud": return await cloud(cwd, opts);
+    case "dashboard": return await dashboard(cwd, opts);
     case "install-engram": return await installEngramCmd(cwd, opts);
     default:
       err(`comando desconocido "${cmd}". Usa ${c.bold("ozali --help")}.`);

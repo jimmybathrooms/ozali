@@ -2104,6 +2104,213 @@ export async function cloud(cwd, opts) {
   }
 }
 
+// ========================================================== dashboard =========
+// Genera un dashboard .md agregado a partir de los hitos documentados en
+// .ozali/docs/cdk/<hito>/, parseando 02-plan-aprobado.md (tipo, tamaño) y
+// 06-uso-tokens.md (métricas). También espeja el resumen a Engram.
+
+const DASHBOARD_PATH = (cwd) => path.join(cwd, ".ozali", "dashboard.md");
+const CDK_DOCS_PATH = (cwd) => path.join(cwd, ".ozali", "docs", "cdk");
+
+/** Extrae el valor de una línea tipo "Clave: valor", "**Clave:** valor" o "*Clave:* valor" en markdown. */
+function extractLine(text, keyRe) {
+  if (!text) return null;
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    let value = null;
+    let startIdx = -1;
+    // Markdown bold: **Key:** valor
+    const boldPrefix = "**" + keyRe + ":**";
+    startIdx = trimmed.indexOf(boldPrefix);
+    if (startIdx !== -1) {
+      value = trimmed.slice(startIdx + boldPrefix.length).trim();
+    }
+    // Markdown italic: *Key:* valor
+    if (value === null) {
+      const italicPrefix = "*" + keyRe + ":*";
+      startIdx = trimmed.indexOf(italicPrefix);
+      if (startIdx !== -1) {
+        value = trimmed.slice(startIdx + italicPrefix.length).trim();
+      }
+    }
+    // Formato plano: Key: valor
+    if (value === null) {
+      const plainPrefix = keyRe + ":";
+      startIdx = trimmed.indexOf(plainPrefix);
+      if (startIdx !== -1) {
+        value = trimmed.slice(startIdx + plainPrefix.length).trim();
+      }
+    }
+    if (value !== null) {
+      // Si hay otro campo markdown en la misma línea, cortar ahí
+      const nextField = value.search(/\s+\*\*[^*]+:\*\*|\s+\*[^*]+:\*/);
+      if (nextField !== -1) {
+        value = value.slice(0, nextField).trim();
+      }
+      return value;
+    }
+  }
+  return null;
+}
+
+/** Extrae la tabla de métricas de 06-uso-tokens.md como objeto {input, output, total, costo}. */
+function parseTokenMetrics(text) {
+  const out = { input: null, output: null, total: null, costo: null, proveedor: null, modelo: null };
+  if (!text) return out;
+  out.proveedor = extractLine(text, "Proveedor");
+  out.modelo = extractLine(text, "Modelo");
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const mInput = line.match(/Tokens de entrada.*?\|\s*([\d,.\s]+|N\/A)/i);
+    if (mInput && mInput[1] !== "N/A") out.input = parseInt(mInput[1].replace(/[\s,]/g, ""), 10) || null;
+    const mOutput = line.match(/Tokens de salida.*?\|\s*([\d,.\s]+|N\/A)/i);
+    if (mOutput && mOutput[1] !== "N/A") out.output = parseInt(mOutput[1].replace(/[\s,]/g, ""), 10) || null;
+    const mTotal = line.match(/Total de tokens.*?\|\s*([\d,.\s]+|N\/A)/i);
+    if (mTotal && mTotal[1] !== "N/A") out.total = parseInt(mTotal[1].replace(/[\s,]/g, ""), 10) || null;
+    const mCosto = line.match(/Costo estimado.*?\|\s*([\d,.\s$]+|N\/A)/i);
+    if (mCosto && mCosto[1] !== "N/A") out.costo = mCosto[1].trim();
+  }
+  return out;
+}
+
+/** Parsea un hito completo desde sus archivos. */
+function parseHito(cwd, slug) {
+  const base = path.join(CDK_DOCS_PATH(cwd), slug);
+  const plan = exists(path.join(base, "02-plan-aprobado.md"))
+    ? fs.readFileSync(path.join(base, "02-plan-aprobado.md"), "utf8")
+    : "";
+  const tokens = exists(path.join(base, "06-uso-tokens.md"))
+    ? fs.readFileSync(path.join(base, "06-uso-tokens.md"), "utf8")
+    : "";
+  const prompt = exists(path.join(base, "01-prompt-entrada.md"))
+    ? fs.readFileSync(path.join(base, "01-prompt-entrada.md"), "utf8")
+    : "";
+
+  const tipo = extractLine(plan, "Tipo") || "—";
+  const tamaño = extractLine(plan, "Tamaño") || "—";
+  const fecha = extractLine(prompt, "Fecha/Hora de la solicitud")
+    || extractLine(plan, "Creado")
+    || extractLine(plan, "Aprobado por.*?(\d{4}-\d{2}-\d{2})")
+    || new Date().toISOString();
+
+  const m = parseTokenMetrics(tokens);
+
+  return {
+    slug,
+    tipo: tipo.replace(/\|.*$/, "").trim().toLowerCase(),
+    tamaño: tamaño.replace(/\|.*$/, "").trim().toUpperCase(),
+    fecha: fecha.slice(0, 10), // yyyy-mm-dd
+    proveedor: m.proveedor || "—",
+    modelo: m.modelo || "—",
+    tokens: m.total || (m.input && m.output ? m.input + m.output : null) || 0,
+    costo: m.costo || "—",
+  };
+}
+
+/** Agrupa hitos por período (año-mes). */
+function groupByPeriod(hitos) {
+  const groups = {};
+  for (const h of hitos) {
+    const key = h.fecha.slice(0, 7); // yyyy-mm
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(h);
+  }
+  return groups;
+}
+
+/** Genera el markdown del dashboard. */
+function generateDashboard(project, hitos) {
+  const groups = groupByPeriod(hitos);
+  const periods = Object.keys(groups).sort().reverse();
+
+  let md = `# Dashboard — ${project}\n\n`;
+  md += `Generado: ${new Date().toISOString().slice(0, 10)}\n\n`;
+
+  // Resumen global
+  const totalHitos = hitos.length;
+  const totalTokens = hitos.reduce((s, h) => s + (h.tokens || 0), 0);
+  const tipoCounts = {};
+  for (const h of hitos) { tipoCounts[h.tipo] = (tipoCounts[h.tipo] || 0) + 1; }
+
+  md += `## Resumen global\n\n`;
+  md += `- **Total de hitos:** ${totalHitos}\n`;
+  md += `- **Total de tokens:** ${totalTokens.toLocaleString()}\n`;
+  md += `- **Por tipo:** ${Object.entries(tipoCounts).map(([k, v]) => `${k}: ${v}`).join(" · ")}\n`;
+  md += `\n`;
+
+  // Tabla por período
+  for (const per of periods) {
+    const [y, m] = per.split("-");
+    const label = `${y}-${m}`;
+    md += `## ${label}\n\n`;
+    md += `| Hito | Tipo | Tamaño | Tokens | Proveedor | Modelo |\n`;
+    md += `|------|------|--------|--------|-----------|--------|\n`;
+    for (const h of groups[per]) {
+      const tks = h.tokens ? h.tokens.toLocaleString() : "—";
+      md += `| ${h.slug} | ${h.tipo} | ${h.tamaño} | ${tks} | ${h.proveedor} | ${h.modelo} |\n`;
+    }
+    md += `\n`;
+  }
+
+  if (periods.length === 0) {
+    md += `> Aún no hay hitos documentados en \`.ozali/docs/cdk/\`.\n\n`;
+  }
+
+  md += `---\n\n`;
+  md += `*Dashboard generado automáticamente por \`ozali dashboard\`.*\n`;
+  return md;
+}
+
+export async function dashboard(cwd, opts = {}) {
+  step("ozali dashboard — resumen de hitos");
+  const cfg = readJSON(CONFIG_PATH(cwd));
+  const project = (cfg && cfg.project) || projectName(cwd);
+
+  const docsDir = CDK_DOCS_PATH(cwd);
+  if (!exists(docsDir)) {
+    warn("No existe .ozali/docs/cdk/ todavía. Corré ozali init y generá al menos un hito con cdk.");
+    return 1;
+  }
+
+  const entries = fs.readdirSync(docsDir, { withFileTypes: true }).filter((e) => e.isDirectory());
+  if (entries.length === 0) {
+    warn("No hay hitos documentados aún.");
+    return 1;
+  }
+
+  const hitos = entries.map((e) => parseHito(cwd, e.name)).sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+  const md = generateDashboard(project, hitos);
+  const outPath = DASHBOARD_PATH(cwd);
+  ensureDir(path.dirname(outPath));
+  fs.writeFileSync(outPath, md);
+  ok(`Dashboard escrito en ${c.bold(path.relative(cwd, outPath))} (${hitos.length} hitos).`);
+
+  // Espejo a Engram (best-effort)
+  const engramOk = tryExec("engram", ["--version"]);
+  if (engramOk) {
+    const summary = `${hitos.length} hitos · ${hitos.reduce((s, h) => s + (h.tokens || 0), 0).toLocaleString()} tokens · períodos: ${Object.keys(groupByPeriod(hitos)).join(", ")}`;
+    try {
+      spawnCmd("engram", [
+        "save", "--title", `cdk/_project/dashboard`,
+        "--topic", `cdk/_project/dashboard`,
+        "--type", "architecture",
+        "--project", project,
+        "--scope", "project",
+        "--content", summary,
+      ]);
+      info("Dashboard espejado a Engram (cdk/_project/dashboard).");
+    } catch {
+      warn("No se pudo espejar el dashboard a Engram.");
+    }
+  } else {
+    info("Engram no disponible; dashboard quedó solo en disco.");
+  }
+
+  return 0;
+}
+
 // ===================================================== session-state =========
 // Helpers para micro-checkpoints en disco (.ozali/.session-state.json).
 // Usados por CDK (skill cdk) para guardar/reanudar estado de hito interrumpido.
