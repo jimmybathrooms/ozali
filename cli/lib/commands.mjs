@@ -2103,3 +2103,33 @@ export async function cloud(cwd, opts) {
       return 1;
   }
 }
+
+// ===================================================== session-state =========
+// Helpers para micro-checkpoints en disco (.ozali/.session-state.json).
+// Usados por CDK (skill cdk) para guardar/reanudar estado de hito interrumpido.
+
+const SESSION_STATE_PATH = (cwd) => path.join(cwd, ".ozali", ".session-state.json");
+
+/** Escribe el estado de sesión de un hito en disco (sobrescribe). */
+export function writeSessionState(cwd, state) {
+  const p = SESSION_STATE_PATH(cwd);
+  const payload = {
+    ...state,
+    last_updated: new Date().toISOString(),
+  };
+  ensureDir(path.dirname(p));
+  writeJSON(p, payload);
+}
+
+/** Lee el estado de sesión de disco. Devuelve null si no existe. */
+export function readSessionState(cwd) {
+  return readJSON(SESSION_STATE_PATH(cwd));
+}
+
+/** Borra el estado de sesión de disco (hito completado). */
+export function clearSessionState(cwd) {
+  const p = SESSION_STATE_PATH(cwd);
+  if (exists(p)) {
+    try { fs.unlinkSync(p); } catch { /* noop */ }
+  }
+}

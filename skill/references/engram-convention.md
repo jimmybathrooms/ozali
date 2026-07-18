@@ -173,20 +173,79 @@ contexto o a cerrar/abrir la sesión.
 ```
 title:     cdk/{hito}/state
 topic_key: cdk/{hito}/state
+type:      architecture
+project:   {project}
+scope:     project
+capture_prompt: false
 content: |
   hito: {hito}
-  fase: {analisis | plan-aprobado | ejecucion | cierre}
+  fase: {analysis_done | plan_approved | execution_done | testing_done | completed}
   strict_tdd: {true|false}
   modo: {normal | --auto}
   tareas:
     completadas: [t1, t2]
     pendientes: [t3, t4]
+  archivos_procesados: [path/relativo/1, path/relativo/2]
   ultimo_commit: {short SHA}
   last_updated: {ISO-8601}
 ```
 
+**Fases obligatorias (checkpoints entre fases):**
+
+| Fase | Significado | Acción del orchestrator |
+|---|---|---|
+| `analysis_done` | Análisis completado, listo para plan | `mem_save` de `analisis` + `mem_update` de `state` con `fase: analysis_done` |
+| `plan_approved` | Plan aprobado en el 🛑 GATE | `mem_save` de `plan-aprobado` (inmutable) + `mem_update` de `state` con `fase: plan_approved` |
+| `execution_done` | Ejecución de código completada | `mem_update` de `state` con `fase: execution_done`, lista final de archivos procesados |
+| `testing_done` | Testing validado | `mem_update` de `state` con `fase: testing_done`, resultado de pruebas |
+| `completed` | Hito cerrado, documentación lista | `mem_save` de `resumen-tecnico` + `mem_session_summary`, **borrar `state`** (hito limpio) |
+
 **Recuperación (2 pasos):** `mem_search("cdk/{hito}/state")` → `mem_get_observation(id)` → parsear
-YAML → restaurar. Si no hay `state`, es un hito nuevo.
+YAML → restaurar. Si no hay `state`, es un hito nuevo. Si la fase es `completed`, ignorar (hito
+ya cerrado).
+
+---
+
+## 4.5. Micro-checkpoints en disco (`.ozali/.session-state.json`)
+
+Complemento local al `state` de Engram. Cuando Engram no está disponible o como respaldo
+tolerante a fallos de red.
+
+**Quién lo escribe:** los `executioners` (durante fase de ejecución) y el `project-orchestrator`
+(al cambiar de fase).
+
+**Cuándo:**
+- Al completar una fase (transición de `analysis_done` → `plan_approved`, etc.).
+- **Durante ejecución:** si el hito modificará **>5 archivos**, guardar micro-checkpoint cada
+  **3-5 archivos procesados**.
+
+**Formato:**
+
+```json
+{
+  "hito": "alta-componente-cobranza",
+  "fase": "execution_done",
+  "strict_tdd": true,
+  "modo": "normal",
+  "tareas": {
+    "completadas": ["t1", "t2"],
+    "pendientes": ["t3"]
+  },
+  "archivos_procesados": [
+    "src/app/cotizacion/cotizacion.module.ts",
+    "src/app/cotizacion/cotizacion.service.ts"
+  ],
+  "ultimo_commit": "a1b2c3d",
+  "last_updated": "2026-07-17T19:45:00Z"
+}
+```
+
+**Reglas:**
+- El archivo es **sobrescrito** (no append-only) — siempre refleja el estado actual.
+- Al reanudar, `cdk` lee este archivo **además** del `state` de Engram. Si ambos existen,
+  usa el más reciente (`last_updated`).
+- Al cerrar el hito (`completed`), el orchestrator **borra** `.session-state.json`.
+- Si no hay Engram (modo `docs`), este archivo es la **única fuente de reanudación**.
 
 ---
 

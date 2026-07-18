@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 3 -->
+<!-- CDK_CONTRACT_VERSION: 4 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `3`**
+> **Versión de contrato vigente: `4`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -139,3 +139,29 @@ Un `cdk` conforme a la v3 debe cumplir TODO lo de la v2, más:
   - El gate de aplicabilidad debe estar documentado en el `SKILL.md` generado como paso
     obligatorio del orquestador (`project-orchestrator`) y reflejarse en la bitácora (`05`).
 - Estampar `cdk_contract_version: 3` en su frontmatter.
+
+### v4 — checkpoints obligatorios entre fases + micro-checkpoints
+Un `cdk` conforme a la v4 debe cumplir TODO lo de la v3, más:
+
+- **Checkpoints obligatorios entre fases:** el `cdk` generado debe guardar un checkpoint
+  (`mem_update` del artefacto `cdk/{hito}/state`) tras **cada transición de fase** del hito:
+  1. `analysis_done` — análisis completado, antes del plan.
+  2. `plan_approved` — plan aprobado en el 🛑 GATE, antes de tocar código.
+  3. `execution_done` — ejecución de código completada.
+  4. `testing_done` — pruebas validadas (pass/fail reportado).
+  5. `completed` — hito cerrado, borrar `state`.
+  - El formato del `state` sigue [`engram-convention.md`](engram-convention.md) §4.
+- **Micro-checkpoints intra-fase:** durante la ejecución, si el hito modifica **>5 archivos**,
+  guardar micro-checkpoint en disco (`.ozali/.session-state.json`) cada **3-5 archivos**
+  procesados. El helper `writeSessionState()` / `readSessionState()` está en el CLI
+  (`commands.mjs`). Ver [`engram-convention.md`](engram-convention.md) §4.5.
+- **Reanudación automática:** al iniciar un hito, el orchestrator debe:
+  1. Buscar `cdk/{hito}/state` en Engram (`mem_search`).
+  2. Leer `.ozali/.session-state.json` del disco (fallback si Engram no está).
+  3. Si encuentra un hito pendiente (fase ≠ `completed`), preguntar al usuario:
+     *"Tenés un hito pendiente en fase [X]. ¿Reanudar desde ahí?"*
+  4. Si reanuda, saltar las fases ya completadas y continuar desde la fase pendiente.
+- **Borrado de estado al cerrar:** al llegar a `completed`, el orchestrator borra
+  `.ozali/.session-state.json` y actualiza el `state` de Engram a `completed` (o lo marca
+  como borrado).
+- Estampar `cdk_contract_version: 4` en su frontmatter.

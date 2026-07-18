@@ -102,6 +102,12 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
 - **Misión:** implementar los cambios de código.
 - **Responsabilidades:** escriben/editan código respetando arquitectura y
   `coding-standards.md`; crean componentes, corrigen bugs, aplican refactors acotados.
+- **Micro-checkpoints intra-fase:** si el hito modificará **>5 archivos**, durante la ejecución
+  guardar micro-checkpoint en disco (`.ozali/.session-state.json`) cada **3-5 archivos**
+  procesados. El contenido incluye: hito slug, fase (`execution_done`), lista de archivos ya
+  procesados, y timestamp (`last_updated`). Esto permite reanudar la ejecución si el agente se
+  interrumpe. El helper `writeSessionState()` / `readSessionState()` está disponible en el CLI
+  (`commands.mjs`).
 - **Entrada:** tarea con criterios. **Salida:** diffs/código.
 - **Herramientas:** edición de código (Read, Edit, Write) + ejecución acotada.
 
