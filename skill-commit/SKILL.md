@@ -1,6 +1,7 @@
 ---
 name: ozali-commit
 description: Genera un "commit summary" convencional (feat/fix/hotfix/refactor) con prefijo, scope y descripción a partir de los cambios EN STAGE y commitea tras tu aprobación. Úsala cuando el usuario quiera "commitea", "haz el commit", "genera el mensaje de commit", "cierra el hito con commit", o cuando otra skill (p. ej. cdk) cierre un hito.
+model: low
 ---
 
 # Skill: ozali-commit

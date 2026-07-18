@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 4 -->
+<!-- CDK_CONTRACT_VERSION: 5 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `4`**
+> **Versión de contrato vigente: `5`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -165,3 +165,48 @@ Un `cdk` conforme a la v4 debe cumplir TODO lo de la v3, más:
   `.ozali/.session-state.json` y actualiza el `state` de Engram a `completed` (o lo marca
   como borrado).
 - Estampar `cdk_contract_version: 4` en su frontmatter.
+
+### v5 — clasificación de agentes por modelo
+Un `cdk` conforme a la v5 debe cumplir TODO lo de la v4, más:
+
+- **Clasificación cognitiva de subagentes:** cada subagente generado (`.claude/agents/<rol>.md`)
+  debe incluir en su frontmatter un campo `model:` que indique el nivel de capacidad requerido,
+  según la tabla de clasificación del proyecto (`.ozali/config.json` → `agents.models.mapping`):
+
+  | Rol | Categoría | Nivel modelo | Justificación |
+  |-----|-----------|--------------|---------------|
+  | `project-analyzer` | A — Análisis Profundo | **high** | Razonamiento profundo, impacto, riesgos bloqueantes |
+  | `project-owner` | A — Análisis Profundo | **high** | Visión, reglas, módulos sensibles |
+  | `executioners` | C — Escritura Código | **high** | Implementación correcta, estándares, arquitectura |
+  | `project-orchestrator` | B — Orquestación | **medium** | Enrutamiento, recall-first, modo auto |
+  | `project-manager` | E — Lectura/Propuesta | **medium** | Backlog, workflows, dependencias |
+  | `project-proposer` | E — Lectura/Propuesta | **medium** | Alternativas, trade-offs, relevancia |
+  | `project-documenter` | C — Escritura Docs | **medium** (híbrido) | Sonnet para sencilla; Opus para técnica |
+  | `tester` | D — Validación | **medium** (híbrido) | Haiku para ejecución mecánica; Sonnet para diagnóstico de fallos |
+
+  El frontmatter de cada subagente debe verse así:
+  ```yaml
+  ---
+  name: project-analyzer
+  description: Analiza impacto y riesgos de cambios de código
+  model: high
+  ---
+  ```
+
+- **Resolución de modelo:** el orquestador (`project-orchestrator`) debe, al invocar un
+  subagente, resolver el modelo real consultando `.ozali/config.json`:
+  - `agents.models.claude.low|medium|high` para Claude Code
+  - `agents.models.opencode.low|medium|high` para opencode
+  - El campo `model:` del subagente indica la clave (`low`, `medium`, `high`) a lookup.
+
+- **Reglas híbridas documentadas:**
+  - `project-documenter`: si el documento a generar es técnico (`03-resumen-tecnico.md`,
+    `05-bitacora-ejecucion.md` con decisiones arquitectónicas), usar `high`. Si es sencillo
+    (`01-prompt-entrada.md`, `04-resumen-usuario.md`, `06-uso-tokens.md`), usar `medium`.
+  - `tester`: en fase de ejecución de tests (mecánica, pass/fail), usar `low`. Si hay fallos
+    y se requiere interpretar la causa raíz, usar `medium`.
+
+- **Skills hermanas también clasificadas:** `ozali`, `ozali-commit`, `skill-generator` deben
+  declarar su `model:` en su frontmatter según la misma tabla (`.ozali/config.json`).
+
+- Estampar `cdk_contract_version: 5` en su frontmatter.

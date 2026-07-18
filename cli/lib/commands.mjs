@@ -13,7 +13,17 @@ import { detectAll, detectSourceOfTruth, detectWorkspace, detectReferences } fro
 import { ask, confirm, select } from "./prompt.mjs";
 
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
+const CONFIG_LOCAL_PATH = (cwd) => path.join(cwd, ".ozali", "config.local.json");
 const TEAM_CLOUD_PATH = (cwd) => path.join(cwd, ".ozali", "cloud.json");
+
+/** Lee config.json y mergea config.local.json encima (local gana, igual que .claude/settings.local.json). */
+function readMergedConfig(cwd) {
+  const base = readJSON(CONFIG_PATH(cwd)) || {};
+  const local = readJSON(CONFIG_LOCAL_PATH(cwd)) || {};
+  if (Object.keys(local).length === 0) return base;
+  // shallow merge: las claves de primer nivel en local sobrescriben base
+  return { ...base, ...local };
+}
 const ENGRAM_CONFIG_PATH = (cwd) => path.join(cwd, ".engram", "config.json");
 const CLOUD_TOKEN_ENV = "ENGRAM_CLOUD_TOKEN";
 const CLOUD_AUTOSYNC_ENV = "ENGRAM_CLOUD_AUTOSYNC";
@@ -1185,7 +1195,7 @@ function ensureWorkspaceJarvisOpencode(root) {
 export async function doctor(cwd, opts = {}) {
   step("ozali doctor — health-check (read-only)");
   const env = detectAll(cwd);
-  const cfg = readJSON(CONFIG_PATH(cwd));
+  const cfg = readMergedConfig(cwd);
   const rows = [];
   const add = (label, good, detail) => rows.push({ label, good, detail });
 
@@ -1245,6 +1255,16 @@ export async function doctor(cwd, opts = {}) {
   console.log("");
   if (bad === 0) ok("Todo en orden. ozali está listo para trabajar.");
   else warn(`${bad} punto(s) a atender. Revisa los ✖ de arriba.`);
+
+  // Verificación: config.json más nuevo que los subagentes generados (config stale)
+  const stale = detectConfigStale(cwd);
+  if (stale.stale) {
+    console.log("");
+    warn("⚠  Configuración modificada después de generar los subagentes");
+    info(`   .ozali/config.json (o .local) fue editado ${stale.configMtimeAgo} después de los subagentes.`);
+    info(`   Los cambios en modelos/agentes NO surten efecto hasta regenerar el cdk.`);
+    info(`   Corre ${c.bold("ozali update")} o invoca la skill 'ozali' para re-generar cdk con la nueva config.`);
+  }
 
   // --fix: auto-remediar problemas detectables
   if (opts.fix && bad > 0) {
@@ -1368,6 +1388,40 @@ function detectJarvis(cwd) {
   const oc = readJSON(path.join(cwd, "opencode.json"));
   if (oc && oc.agent && oc.agent["ozali-jarvis"]) where.push("opencode");
   return { present: where.length > 0, where };
+}
+
+/** Detecta si .ozali/config.json (o .local) fue modificado después de generar los subagentes. */
+function detectConfigStale(cwd) {
+  const configPath = CONFIG_PATH(cwd);
+  const localPath = CONFIG_LOCAL_PATH(cwd);
+  const agentsDir = path.join(cwd, ".claude", "agents");
+  const cdkSkillPath = path.join(cwd, ".claude", "skills", "cdk", "SKILL.md");
+
+  const configMtime = exists(localPath) ? fs.statSync(localPath).mtimeMs : (exists(configPath) ? fs.statSync(configPath).mtimeMs : 0);
+  if (!configMtime) return { stale: false };
+
+  let newestAgentMtime = 0;
+  if (exists(agentsDir)) {
+    for (const f of fs.readdirSync(agentsDir)) {
+      if (f.endsWith(".md")) {
+        const m = fs.statSync(path.join(agentsDir, f)).mtimeMs;
+        if (m > newestAgentMtime) newestAgentMtime = m;
+      }
+    }
+  }
+  if (exists(cdkSkillPath)) {
+    const m = fs.statSync(cdkSkillPath).mtimeMs;
+    if (m > newestAgentMtime) newestAgentMtime = m;
+  }
+
+  if (newestAgentMtime === 0) return { stale: false }; // no hay subagentes aún
+
+  const stale = configMtime > newestAgentMtime;
+  if (!stale) return { stale: false };
+
+  const diffMin = Math.round((configMtime - newestAgentMtime) / 60000);
+  const ago = diffMin < 60 ? `hace ${diffMin} min` : `hace ${Math.round(diffMin / 60)} h`;
+  return { stale: true, configMtimeAgo: ago };
 }
 
 function readStrictTdd(cwd, sot) {

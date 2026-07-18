@@ -10,6 +10,18 @@
 
 ---
 
+## 🗞️ Novedades
+
+| Versión | Novedad |
+|---------|---------|
+| **v0.15.0** | **Clasificación cognitiva de agentes**: cada subagente CDK tiene un `model:` (`low`/`medium`/`high`) que se resuelve a modelo real de Claude u opencode vía `.ozali/config.json`. Reglas híbridas para `project-documenter` (técnico vs sencillo) y `tester` (ejecución vs diagnóstico). Configuración local `.ozali/config.local.json`. `ozali doctor` detecta si el config fue editado después de generar los subagentes. |
+| v0.14.0 | Dashboard `ozali dashboard`, checkpoints obligatorios entre fases CDK, reanudación automática de hitos, micro-checkpoints intra-fase. Co-authored-by automático en `ozali-commit`. |
+| v0.13.0 | Cloud sync auto (`ozali sync --auto`), workspace multi-repo, `ozali audit --tui`, Engram Cloud con enrolamiento, deploy guides VPS y GCloud. |
+| v0.12.0 | Skill `skill-generator`, CDK contrato v2 (seguridad PII + integración skill-generator), `ozali doctor --fix`, `ozali init --knowledge-only`. |
+| v0.11.0 | Memoria híbrida (Engram + docs), recall-first, telemetría de tokens, `ozali-jarvis` always-on. |
+
+---
+
 ## Qué es
 
 `ozali` lleva a cualquier repositorio existente a un flujo de desarrollo asistido por IA,
@@ -174,6 +186,32 @@ Claude Code y opencode (perfiles de permisos para ambos en
 | Contrato y versión de `cdk` | [skill/references/cdk-contract.md](skill/references/cdk-contract.md) |
 | Blueprint de agentes | [skill/references/agents-blueprint.md](skill/references/agents-blueprint.md) |
 | Memoria híbrida (docs + Engram) | [skill/references/engram-convention.md](skill/references/engram-convention.md) |
+
+### Agentes y Modelos
+
+Cada agente del ecosistema `ozali` / `cdk` se clasifica por **categoría cognitiva** y se le asigna un **nivel de modelo** (`low` / `medium` / `high`). El modelo real (Claude u opencode) se resuelve consultando `.ozali/config.json` → `agents.models.{claude\|opencode}.{low\|medium\|high}`.
+
+| # | Agente / Skill | Categoría | Nivel | Modelo Claude | Modelo Opencode |
+|---|---------------|-----------|-------|---------------|-----------------|
+| 1 | `project-analyzer` | A — Análisis Profundo | **High** | `claude-opus-4` | `mimo-v2.5` |
+| 2 | `project-owner` | A — Análisis Profundo | **High** | `claude-opus-4` | `mimo-v2.5` |
+| 3 | `ozali` | A — Análisis Profundo | **High** | `claude-opus-4` | `mimo-v2.5` |
+| 4 | `executioners` | C — Escritura Código | **High** | `claude-opus-4` | `mimo-v2.5` |
+| 5 | `project-orchestrator` | B — Orquestación | **Medium** | `claude-sonnet-4-5` | `deepseek-v4-pro` |
+| 6 | `ozali-jarvis` | B — Orquestación | **Medium** | `claude-sonnet-4-5` | `deepseek-v4-pro` |
+| 7 | `cdk` | B — Orquestación | **Medium** | `claude-sonnet-4-5` | `deepseek-v4-pro` |
+| 8 | `project-manager` | E — Lectura/Propuesta | **Medium** | `claude-sonnet-4-5` | `deepseek-v4-pro` |
+| 9 | `project-proposer` | E — Lectura/Propuesta | **Medium** | `claude-sonnet-4-5` | `deepseek-v4-pro` |
+| 10 | `skill-generator` | E — Lectura/Propuesta | **Medium** | `claude-sonnet-4-5` | `deepseek-v4-pro` |
+| 11 | `tester` | D — Validación | **Medium** (híbrido) | `claude-sonnet-4-5` | `deepseek-v4-pro` |
+| 12 | `project-documenter` | C — Escritura Docs | **Medium** (híbrido) | `claude-sonnet-4-5` | `deepseek-v4-pro` |
+| 13 | `ozali-commit` | D — Validación | **Low** | `claude-haiku-4-5` | `kimi-k3` |
+
+> **Reglas híbridas:**
+> - `project-documenter`: usa **High** para docs técnicos (`03-resumen-tecnico.md`, `05-bitacora-ejecucion.md`), **Medium** para docs sencillas (`01-prompt-entrada.md`, `04-resumen-usuario.md`).
+> - `tester`: usa **Low** para ejecución mecánica de tests (pass/fail), **Medium** para diagnóstico de fallos.
+>
+> **Configuración local:** `.ozali/config.local.json` hace shallow merge sobre `.ozali/config.json` (igual que `.claude/settings.local.json`). Úsalo para ajustar modelos sin tocar el config compartido del equipo.
 
 > Linaje: `ozali` se nutre de conceptos de
 > [gentle-ai](https://github.com/Gentleman-Programming/gentle-ai) (Engram, calibración SDD/TDD,

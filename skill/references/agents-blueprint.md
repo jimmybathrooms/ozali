@@ -11,16 +11,16 @@ herramientas acotadas y un contrato de entrada/salida.
 
 ## Esquema de responsabilidades (vista rápida)
 
-| Rol                  | Decide | Produce | Lee de la fuente de verdad |
-|----------------------|--------|---------|----------------------------|
-| project-owner        | Qué se puede/no tocar; criterios de aceptación | Veredicto de alcance | `AI.md`, módulos de negocio |
-| project-manager      | Descomposición y orden de tareas | Backlog de tareas con estados | `.ai/workflows/*` |
-| project-analyzer     | Impacto y riesgos del cambio | **Doc 1**: análisis + hitos | `.ai/context/architecture.md` |
-| project-orchestrator | Quién ejecuta y en qué orden | Resultados integrados | todo el `.ai/` |
-| executioners         | Cómo se implementa | Código + diffs | `.ai/context/coding-standards.md` |
-| project-proposer     | Alternativas y mejoras | **Doc 3**: mejoras con relevancia | `.ai/knowledge/*` |
-| project-documenter   | Forma/registro de la salida | **Docs 01-06 por hito** con encabezado | `references/doc-templates.md` |
-| tester               | Si cumple criterios | Reporte de pruebas | `.ai/agents/tester.md`, `.ai/workflows/*` |
+| Rol                  | Decide | Produce | Lee de la fuente de verdad | Categoría cognitiva | Nivel modelo |
+|----------------------|--------|---------|----------------------------|---------------------|--------------|
+| project-owner        | Qué se puede/no tocar; criterios de aceptación | Veredicto de alcance | `AI.md`, módulos de negocio | **A — Análisis Profundo** | **High** |
+| project-manager      | Descomposición y orden de tareas | Backlog de tareas con estados | `.ai/workflows/*` | **E — Lectura/Propuesta** | **Medium** |
+| project-analyzer     | Impacto y riesgos del cambio | **Doc 1**: análisis + hitos | `.ai/context/architecture.md` | **A — Análisis Profundo** | **High** |
+| project-orchestrator | Quién ejecuta y en qué orden | Resultados integrados | todo el `.ai/` | **B — Orquestación** | **Medium** |
+| executioners         | Cómo se implementa | Código + diffs | `.ai/context/coding-standards.md` | **C — Escritura Código** | **High** |
+| project-proposer     | Alternativas y mejoras | **Doc 3**: mejoras con relevancia | `.ai/knowledge/*` | **E — Lectura/Propuesta** | **Medium** |
+| project-documenter   | Forma/registro de la salida | **Docs 01-06 por hito** con encabezado | `references/doc-templates.md` | **C — Escritura Docs** | **Medium** (híbrido: High para técnico) |
+| tester               | Si cumple criterios | Reporte de pruebas | `.ai/agents/tester.md`, `.ai/workflows/*` | **D — Validación** | **Medium** (híbrido: Low para ejecución, Medium para diagnóstico) |
 
 Flujo típico de una tarea en `cdk`:
 
@@ -39,7 +39,8 @@ aplicabilidad (gate CDK-first) → owner (alcance) → manager (tareas) → anal
 ## Definiciones por rol
 
 Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontmatter
-`name`, `description` (cuándo invocarlo) y herramientas, más el system prompt.
+`name`, `description` (cuándo invocarlo), `model` (nivel cognitivo: `low`, `medium`, `high`)
+y herramientas, más el system prompt.
 
 ### 1. project-owner
 - **Misión:** custodiar la visión y las reglas del proyecto; autorizar o rechazar el alcance.

@@ -1,6 +1,7 @@
 ---
 name: ozali
-description: Skill base/bootstrap interactiva que diagnostica el repositorio, valida la fuente de verdad del proyecto (AI.md/.ai o IA.md/.ia), calibra las capacidades de testing y el modo Strict TDD, y guía al usuario, paso a paso, para construir y configurar la skill `cdk` del proyecto junto con su estructura de agentes y subagentes. Úsala cuando el usuario quiera "diagnosticar el proyecto", "preparar/configurar cdk", "calibrar el proyecto", "generar la estructura de agentes", "arrancar ozali desde cero" o invoque "ozali".
+description: Diagnostica, calibra y planifica la skill `cdk` de un proyecto. Úsala cuando quieras "preparar cdk", "calibrar el proyecto", "generar la estructura de agentes", "arrancar ozali desde cero" o invocar "ozali".
+model: high
 ---
 
 # Skill: ozali
@@ -155,6 +156,20 @@ Guarda estos valores; se reutilizan en Fase 6 y en la documentación.
 > Sin `cdk` previo, esta fase no hace nada salvo registrar `GENERAR`. La calibración (Fase 3.5) y el
 > resto del flujo continúan igual.
 
+### Configuración local (`.ozali/config.local.json`)
+
+`ozali` soporta un archivo de configuración local que **sobrescribe** `.ozali/config.json`
+sin modificar el config del repo (igual que `.claude/settings.local.json` sobrescribe
+`.claude/settings.json`).
+
+- **Ruta:** `.ozali/config.local.json`
+- **Merge:** shallow merge; las claves de primer nivel en `.local` ganan sobre el base.
+- **Uso típico:** ajustar `agents.models` (modelos de agentes) o `knowledgeRepo` para tu
+  entorno local sin tocar el config compartido del equipo.
+- **Advertencia:** los cambios en `agents.models` **no surten efecto** en los subagentes ya
+  generados hasta que se **regenera o actualiza `cdk`** (correr `ozali update` o invocar
+  `ozali` de nuevo). `ozali doctor` detecta esta condición y te avisa.
+
 ---
 
 ## Fase 1 — Detección de la fuente de verdad
@@ -257,17 +272,23 @@ pruebas"** y condiciona el ciclo `executioners ⇄ tester` de `cdk` (Fase 6).
 ## Fase 4 — Diseño de agentes y subagentes para `cdk`
 
 A partir del conocimiento consolidado, diseña la estructura de agentes de `cdk`. El catálogo
-canónico de los **8 roles**, su esquema de responsabilidades, entradas/salidas y mapeo a la
-fuente de verdad está en [`references/agents-blueprint.md`](references/agents-blueprint.md):
+canónico de los **8 roles**, su esquema de responsabilidades, entradas/salidas, **clasificación
+cognitiva y modelo asignado** está en [`references/agents-blueprint.md`](references/agents-blueprint.md):
 
-1. **project-owner** — visión, reglas y criterios de aceptación; qué se puede/no tocar.
-2. **project-manager** — descompone la solicitud en tareas, estados y dependencias; aplica workflows.
-3. **project-analyzer** — analiza código e impacto; produce el documento 1 (análisis + hitos).
-4. **project-orchestrator** — enruta el trabajo entre subagentes e integra resultados.
-5. **executioners** — implementan los cambios de código respetando estándares y arquitectura.
-6. **project-proposer** — propone alternativas y mejoras con grados de relevancia (documento 3).
-7. **project-documenter** — genera y mantiene los documentos `.md` con encabezado de identidad.
-8. **tester** — valida con pruebas (unit/e2e) y reporta resultados contra criterios de aceptación.
+| # | Rol | Categoría | Nivel modelo | Justificación |
+|---|-----|-----------|--------------|---------------|
+| 1 | **project-owner** | A — Análisis Profundo | **high** | Visión, reglas, módulos sensibles |
+| 2 | **project-manager** | E — Lectura/Propuesta | **medium** | Backlog, workflows, dependencias |
+| 3 | **project-analyzer** | A — Análisis Profundo | **high** | Impacto, riesgos bloqueantes, hitos |
+| 4 | **project-orchestrator** | B — Orquestación | **medium** | Enrutamiento, recall-first, modo auto |
+| 5 | **executioners** | C — Escritura Código | **high** | Implementación, estándares, arquitectura |
+| 6 | **project-proposer** | E — Lectura/Propuesta | **medium** | Alternativas, trade-offs, relevancia |
+| 7 | **project-documenter** | C — Escritura Docs | **medium** (híbrido) | Sonnet sencilla; Opus técnica |
+| 8 | **tester** | D — Validación | **medium** (híbrido) | Haiku ejecución; Sonnet diagnóstico |
+
+> **Resolución de modelo:** el nivel (`low`, `medium`, `high`) se resuelve a modelo real
+> consultando `.ozali/config.json` → `agents.models.{claude|opencode}.{low|medium|high}`.
+> El orquestador debe hacer este lookup al invocar cada subagente.
 
 Si la fuente de verdad **no** aporta suficiente para definir una identidad (responsabilidad,
 herramientas permitidas, límites), **pregunta al usuario** lo mínimo necesario. No inventes
@@ -324,9 +345,13 @@ Solo tras la aprobación de la Fase 5. Genera:
    - declarar en el frontmatter una **description con triggers ricos** (verbos y sustantivos
      que el usuario usaría: "crea", "genera", "corrige", "refactoriza", método, clase,
      endpoint, componente…) para mejorar la auto-invocación de la skill;
-   - **estampar en el frontmatter** `cdk_contract_version: N`, con `N` = la versión de contrato
-     vigente de [`references/cdk-contract.md`](references/cdk-contract.md). Esto permite que el
-     pre-flight (Fase 0.5) y `ozali doctor`/`ozali update` sepan si el `cdk` está al día;
+    - **estampar en el frontmatter** `cdk_contract_version: N`, con `N` = la versión de contrato
+      vigente de [`references/cdk-contract.md`](references/cdk-contract.md). Esto permite que el
+      pre-flight (Fase 0.5) y `ozali doctor`/`ozali update` sepan si el `cdk` está al día;
+    - **estampar en el frontmatter** `model: medium` (el orquestador `cdk` opera en nivel medio);
+    - **resolver modelo de subagentes:** el orquestador debe, al invocar cada subagente, leer
+      su `model:` del frontmatter y resolverlo a modelo real vía `.ozali/config.json` →
+      `agents.models.{claude|opencode}.{low|medium|high}`;
    - declarar que ayuda a **generar código** (nuevo componente, fix de bug, análisis de impacto)
      respetando la fuente de verdad y los estándares del proyecto;
     - orquestar los 8 subagentes según la fase del trabajo;
@@ -401,7 +426,10 @@ Solo tras la aprobación de la Fase 5. Genera:
       amablemente solicitudes de lectura de `.env`, `~/.aws/credentials`, `~/.ssh/id_rsa`, etc.
  2. `.claude/agents/<rol>.md` — un subagente real por cada uno de los 8 roles, con su system
     prompt y herramientas, según [`references/agents-blueprint.md`](references/agents-blueprint.md).
-    Cada subagente debe respetar las **restricciones de seguridad** arriba mencionadas.
+    Cada subagente debe:
+    - Incluir `model: {low|medium|high}` en su frontmatter, según la clasificación de Fase 4.
+    - Respetar las **restricciones de seguridad** arriba mencionadas.
+    - Ser resuelto a modelo real por el orquestador consultando `.ozali/config.json`.
  3. `.claude/skills/cdk/verify-structure.mjs` — **harness del analista**: script Node sin
     dependencias (Node 16+) adaptado a la estructura real del proyecto. Verifica paquetes/capas
     esperados, localiza clases clave, reporta discrepancias doc↔código y, con `--grep <palabra>`,

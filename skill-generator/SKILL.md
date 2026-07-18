@@ -1,6 +1,7 @@
 ---
 name: skill-generator
 description: Genera skills reutilizables para agentes de IA (Claude Code, opencode, Cursor, etc.) a partir de tareas repetitivas detectadas en el proyecto. Evalúa si un flujo de trabajo merece convertirse en skill, diseña su estructura según el Agent Skills Specification (skills.sh), y la materializa como SKILL.md + referencias. Úsala cuando el usuario quiera "crear una skill", "hacer un skill para...", "automatizar esto como skill", "generar una skill", "extraer esto a skill" o cuando detectes un patrón repetitivo que valga la pena encapsular.
+model: medium
 ---
 
 # Skill: skill-generator
