@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 2 -->
+<!-- CDK_CONTRACT_VERSION: 3 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `2`**
+> **Versión de contrato vigente: `3`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -114,3 +114,28 @@ Un `cdk` conforme a la v2 debe cumplir TODO lo de la v1, más:
     - Emails: `jua***@ejemplo.com` (solo 3 primeros chars del usuario)
   - Todo dato sensible que deba presentarse en pantalla debe aparecer como `***` o `[REDACTED]`.
 - Estampar `cdk_contract_version: 2` en su frontmatter.
+
+### v3 — gate de aplicabilidad (CDK-first)
+Un `cdk` conforme a la v3 debe cumplir TODO lo de la v2, más:
+
+- **Gate de aplicabilidad previo:** antes de revisar archivos, ejecutar harnesses o iniciar
+  cualquier análisis de código, el `cdk` debe verificar si la solicitud del usuario aplica para
+  ser procesada por CDK (tareas de desarrollo de software: nuevo componente, fix de bug,
+  refactor, endpoint, método, clase, validación, etc.).
+  - Si **aplica**: debe hacer **énfasis explícito** al usuario de que la solicitud entrará por
+    CDK (`"Esta solicitud aplica para CDK. Procederé con el flujo de desarrollo disciplinado."`)
+    y continuar con el flujo normal (recall-first, análisis, GATE, ejecución).
+  - Si **NO aplica** (p. ej. pregunta conceptual, configuración de entorno, tarea puramente
+    administrativa, generación de documentación fuera del alcance de CDK, o cualquier tarea
+    que no implique cambio de código de negocio): debe **informar al usuario** amablemente que
+    la solicitud no entra por el flujo CDK, explicar por qué, y **sugerir alternativas**
+    (otra skill, comando manual, o cómo reformular la petición para que aplique). Ser permisivo:
+    preguntar al usuario si desea continuar con CDK de todos modos, usar otra vía, o reformular.
+    Si el usuario decide continuar con CDK a pesar de no aplicar estrictamente, registrar la
+    excepción en la bitácora (`05`) y proseguir con el flujo normal. Si decide otra vía, registrar
+    la decisión y detener el flujo.
+  - Esta verificación debe ocurrir **inmediatamente después de capturar el prompt** y antes de
+    cualquier operación de lectura de archivos del proyecto.
+  - El gate de aplicabilidad debe estar documentado en el `SKILL.md` generado como paso
+    obligatorio del orquestador (`project-orchestrator`) y reflejarse en la bitácora (`05`).
+- Estampar `cdk_contract_version: 3` en su frontmatter.

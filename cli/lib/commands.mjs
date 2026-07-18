@@ -109,6 +109,17 @@ function cloudStatusSnapshot(cwd, project) {
 // ============================================================ init ===========
 
 /**
+ * Normaliza un config de ozali antes de persistirlo:
+ * - Convierte knowledgeRepo a path portable (relativo o ~) si existe.
+ */
+function normalizeConfig(cfg, cwd) {
+  if (cfg && cfg.knowledgeRepo) {
+    cfg.knowledgeRepo = toPortablePath(cfg.knowledgeRepo, cwd);
+  }
+  return cfg;
+}
+
+/**
  * Inicializa (o reconfigura) únicamente el repo de conocimiento y el config mínimo.
  * Reutilizable por `init --knowledge-only`, `doctor --fix`, etc.
  */
@@ -1285,7 +1296,7 @@ export async function doctor(cwd, opts = {}) {
   // Auto-upgrade: si Engram acaba de instalarse y el config aún dice "docs", subir a hybrid.
   if (cfg && cfg.memoryMode === "docs" && env.engram.available) {
     cfg.memoryMode = "hybrid";
-    writeJSON(CONFIG_PATH(cwd), cfg);
+    writeJSON(CONFIG_PATH(cwd), normalizeConfig(cfg, cwd));
     ok("Engram detectado → modo de memoria actualizado a " + c.bold("hybrid") + " en .ozali/config.json.");
   }
 
@@ -1491,7 +1502,7 @@ export async function update(cwd, opts = {}) {
   }
 
   // 5) versión del config
-  if (cfg) { cfg.version = pkgVersion(); cfg.updatedAt = new Date().toISOString(); writeJSON(cfgPath, cfg); }
+  if (cfg) { cfg.version = pkgVersion(); cfg.updatedAt = new Date().toISOString(); writeJSON(cfgPath, normalizeConfig(cfg, cwd)); }
   ok(`Instalación al día con ozali v${pkgVersion()}.`);
   return 0;
 }
@@ -1665,7 +1676,7 @@ export async function installEngramCmd(cwd, opts) {
       cfg.agent = agent;
       wrote = true;
     }
-    if (wrote) writeJSON(CONFIG_PATH(cwd), cfg);
+    if (wrote) writeJSON(CONFIG_PATH(cwd), normalizeConfig(cfg, cwd));
   } else {
     warn("No hay configuración de ozali en esta ruta (corre " + c.bold("ozali init") + " para completar el setup).");
     info("Engram quedó instalado; solo falta el config de ozali para integrarlo al flujo.");

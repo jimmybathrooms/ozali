@@ -25,10 +25,14 @@ herramientas acotadas y un contrato de entrada/salida.
 Flujo típico de una tarea en `cdk`:
 
 ```
-owner (alcance) → manager (tareas) → analyzer (impacto, Doc1)
+aplicabilidad (gate CDK-first) → owner (alcance) → manager (tareas) → analyzer (impacto, Doc1)
    → orchestrator → executioners (código) ⇄ tester (pruebas)
    → proposer (Doc3) → documenter (Docs 01-06 por hito)
 ```
+
+> El paso **aplicabilidad** es obligatorio y previo: antes de cualquier lectura de archivos,
+> el orquestador verifica si la solicitud aplica para CDK. Si no aplica, se detiene y sugiere
+> alternativas sin iniciar el resto del flujo.
 
 ---
 
@@ -70,7 +74,15 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
 
 ### 4. project-orchestrator
 - **Misión:** enrutar el trabajo entre subagentes e integrar resultados.
-- **Responsabilidades:** decide qué subagente actúa y en qué orden; gestiona iteraciones
+- **Responsabilidades:**
+  1. **Gate de aplicabilidad (CDK-first)**: inmediatamente después de capturar el prompt del
+     usuario, verificar si la solicitud aplica para CDK **antes de revisar archivos**. Si no
+     aplica, informar al usuario amablemente, explicar por qué, sugerir alternativas, y ser
+     permisivo: preguntar si desea continuar con CDK de todos modos, usar otra vía, o reformular.
+     Si el usuario decide continuar con CDK a pesar de no aplicar estrictamente, registrar la
+     excepción en la bitácora (`05`) y proseguir con el flujo normal. Si decide otra vía, registrar
+     la decisión y detener el flujo.
+  2. Decide qué subagente actúa y en qué orden; gestiona iteraciones
   executioners ⇄ tester; consolida la salida final. **Alimenta al `project-documenter`** con
   los eventos del ciclo (dudas, decisiones, desvíos) para la bitácora `05`. **Hace cumplir el
   recall-first** (convención §7): recuperación selectiva (no volcar toda la memoria), restauración

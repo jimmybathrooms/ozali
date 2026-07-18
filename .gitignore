@@ -15,6 +15,9 @@ pnpm-debug.log*
 ozali-*.tgz
 /package/
 
+# Documentación interna (no commiteada)
+docs/info/
+
 # OS / editor
 .DS_Store
 *.log

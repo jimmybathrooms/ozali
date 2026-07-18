@@ -308,8 +308,24 @@ Solo tras la aprobación de la Fase 5. Genera:
      pre-flight (Fase 0.5) y `ozali doctor`/`ozali update` sepan si el `cdk` está al día;
    - declarar que ayuda a **generar código** (nuevo componente, fix de bug, análisis de impacto)
      respetando la fuente de verdad y los estándares del proyecto;
-   - orquestar los 8 subagentes según la fase del trabajo;
-   - exigir que el análisis arranque con el **harness de verificación de estructura**
+    - orquestar los 8 subagentes según la fase del trabajo;
+    - **gate de aplicabilidad previo (CDK-first)**: inmediatamente después de capturar el
+      prompt del usuario, **antes de revisar archivos o ejecutar cualquier harness**, verificar
+      si la solicitud aplica para ser procesada por CDK (tareas de desarrollo de software:
+      nuevo componente, fix de bug, refactor, endpoint, método, clase, validación, análisis de
+      impacto, etc.).
+      - Si **aplica**: hacer **énfasis explícito** al usuario (`"Esta solicitud aplica para CDK.
+        Procederé con el flujo de desarrollo disciplinado."`) y continuar con el flujo normal.
+      - Si **NO aplica** (pregunta conceptual, configuración de entorno, tarea administrativa,
+        documentación fuera del alcance de CDK, o cualquier tarea que no implique cambio de
+        código de negocio): **informar amablemente** al usuario que la solicitud no entra por
+        el flujo CDK, explicar por qué, y **sugerir alternativas** (otra skill, comando manual,
+        o cómo reformular la petición para que aplique). **Ser permisivo:** preguntar al usuario
+        si desea continuar con CDK de todos modos, usar otra vía, o reformular. Si el usuario
+        decide continuar con CDK a pesar de no aplicar estrictamente, registrar la excepción
+        en la bitácora (`05`) y proseguir con el flujo normal. Si decide otra vía, registrar
+        la decisión y detener el flujo.
+    - exigir que el análisis arranque con el **harness de verificación de estructura**
      (punto 3 abajo) antes de planear nada;
    - **respetar la calibración de Strict TDD** (Fase 3.5): si `strict_tdd: true`, el ciclo
      `executioners ⇄ tester` es **test-first** (RED → GREEN → REFACTOR): se escribe la prueba que
