@@ -58,6 +58,53 @@ feat(cobranza): agrega validación de RFC en alta de cotización
 - cubre el caso de RFC genérico (XAXX010101000)
 ```
 
+### 3.5 Co-authored-by (agente y modelo)
+
+Agrega automáticamente un trailer `Co-authored-by:` al final del mensaje para identificar
+el **agente de IA** y el **modelo** que generó el cambio. Esto mejora la trazabilidad del
+equipo y facilita la telemetría posterior.
+
+**Detección del agente:**
+1. **opencode**: si existe `opencode.json` en la raíz del repo o variables de entorno
+   `OPENCODE_*` / `OPEN_CODE_*`.
+2. **Claude Code**: si existen variables `CLAUDE_*`, `ANTHROPIC_*`, o el contexto indica
+   Claude Code (p. ej. existe `.claude/` con `settings.json` del workspace).
+3. **Fallback**: si no se puede determinar, omitir el trailer (no inventar).
+
+**Detección del modelo:**
+- **opencode**: leer `opencode.json` → campo `model` (o `agent.*.model` si está anidado).
+- **Claude Code**: variable `ANTHROPIC_MODEL` o `CLAUDE_MODEL`; si no está, inferir del
+  contexto (el modelo que responde actualmente — sin inventar).
+- **Fallback**: `unknown` (si el modelo no se detecta, omitir el trailer).
+
+**Formato del trailer:**
+```
+Co-authored-by: {agente} <{modelo}@{dominio}>
+```
+
+| Agente | Dominio | Ejemplo |
+|---|---|---|
+| Claude Code | `anthropic.com` | `Co-authored-by: Claude Code <claude-opus-4@anthropic.com>` |
+| opencode | `opencode.ai` | `Co-authored-by: opencode <kimi-k2.6@opencode.ai>` |
+
+**Reglas:**
+- El trailer se coloca al **final del mensaje**, separado del cuerpo por una línea en blanco
+  (formato [Git trailers](https://git-scm.com/docs/git-interpret-trailers)).
+- **Opt-out**: si `.ozali/config.json` contiene `"coAuthor": false`, omitir este paso
+  completamente.
+- Si no se detecta **tanto agente como modelo** con confianza, **omitir** el trailer.
+- No inventar agentes ni modelos: mejor sin trailer que con datos falsos.
+
+**Ejemplo completo del mensaje:**
+```
+feat(cobranza): agrega validación de RFC en alta de cotización
+
+- valida formato y dígito verificador antes de persistir
+- cubre el caso de RFC genérico (XAXX010101000)
+
+Co-authored-by: Claude Code <claude-opus-4@anthropic.com>
+```
+
 ### 4. 🛑 GATE de mensaje
 Presenta el mensaje completo **como texto visible** y espera aprobación. Si el usuario pide ajustes,
 itera. **No commitees** hasta el "ok".
