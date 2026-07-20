@@ -57,6 +57,43 @@ export function detectEngram() {
   return { available: !!bin, bin: bin || null };
 }
 
+/**
+ * Verifica si el plugin engram@engram está instalado y HABILITADO a nivel usuario
+ * en Claude Code (~/.claude/plugins/installed_plugins.json).
+ * El binario puede estar en PATH y el .mcp.json clonado en marketplaces, pero si
+ * el plugin no figura con scope:user, Claude Code NO levanta el servidor MCP.
+ */
+export function detectEngramPluginInstalled() {
+  const installedPath = path.join(HOME, ".claude", "plugins", "installed_plugins.json");
+  if (!exists(installedPath)) {
+    return { installed: false, enabled: false, path: installedPath, detail: "no existe installed_plugins.json" };
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(installedPath, "utf8"));
+    const entries = data["engram@engram"];
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return { installed: false, enabled: false, path: installedPath, detail: "plugin engram@engram no registrado" };
+    }
+    const userEntry = entries.find((e) => e && e.scope === "user");
+    if (userEntry) {
+      return {
+        installed: true,
+        enabled: true,
+        path: installedPath,
+        detail: `habilitado (scope: user, v${userEntry.version || "?"})`,
+      };
+    }
+    return {
+      installed: true,
+      enabled: false,
+      path: installedPath,
+      detail: "plugin instalado pero no habilitado para el usuario (scope: user)",
+    };
+  } catch {
+    return { installed: false, enabled: false, path: installedPath, detail: "error leyendo installed_plugins.json" };
+  }
+}
+
 /** Detecta si Obsidian está instalado. Devuelve { installed, path } por SO. */
 export function detectObsidian() {
   const plat = process.platform;
@@ -142,6 +179,7 @@ export function detectAll(cwd) {
     skill: detectInstalledSkill(cwd),
     skillGenerator: detectInstalledSkillGenerator(cwd),
     engram: detectEngram(),
+    engramPlugin: detectEngramPluginInstalled(),
     obsidian: detectObsidian(),
     cloud: detectCloud(cwd),
     testing: detectTesting(cwd),

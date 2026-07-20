@@ -13,6 +13,14 @@ equipo **en contexto** usando la memoria de Engram y delegar la ejecución de c�
 > Esta persona lo **complementa**: no dupliques sus reglas; añade la orquestación y el wiring a `cdk`.
 
 ## 1. Al iniciar (recall-first)
+- **Handshake Engram:** antes de `mem_current_project`, intenta la herramienta. Si **no existe**
+  o falla (las tools `mem_*` no están cargadas), muestra una advertencia **prominente** al usuario:
+  > ⚠️ Engram MCP no está activo. Las tools `mem_*` no están disponibles.  
+  > Para activar memoria persistente, abre `/plugin` en Claude Code, instala `engram@engram`
+  > (Enable / "instalar para mí") y reinicia Claude Code.  
+  > Hasta entonces, el trabajo **no se acumulará** en memoria de equipo.
+  - Continúa en modo `docs` (sin bloquear), pero **anota** en el registro que el espejo Engram
+    está pendiente.
 - Confirma el proyecto con `mem_current_project` (debe coincidir con `.engram/config.json`).
 - Recupera contexto reciente del equipo: `mem_context` + `mem_search` de lo relacionado a la tarea.
 - **Recuperación selectiva:** `mem_search` devuelve previews truncados; haz `mem_get_observation`

@@ -430,6 +430,55 @@ test("fromPortablePath expande ~ y resuelve relativos", () => {
   assert.equal(fromPortablePath("/abs", cwd), "/abs");
 });
 
+test("toPortablePath prefiere base sobre home cuando el path está bajo ambos", () => {
+  const home = os.homedir();
+  const project = path.join(home, "projects", "foo");
+  const knowledge = path.join(project, ".k");
+  assert.equal(toPortablePath(knowledge, project), ".k");
+});
+
+test("toPortablePath expande ~ antes de resolver y no usa process.cwd()", () => {
+  const home = os.homedir();
+  const cwd = "/project";
+  // ~/foo debe resolverse contra home, no contra process.cwd()
+  assert.equal(toPortablePath("~/.ozali/knowledge", cwd), "~/.ozali/knowledge");
+  // path relativo debe resolverse contra base, no contra process.cwd()
+  assert.equal(toPortablePath(".k", cwd), ".k");
+});
+
+test("toPortablePath no compacta paths con ~ interno (corrupción legacy)", () => {
+  const home = os.homedir();
+  const project = path.join(home, "projects", "foo");
+  // Simula un path corrupto generado por una versión anterior:
+  // ~/projects/foo/~/projects/foo/.ozali/knowledge
+  const corrupt = path.join(home, "projects", "foo", "~", "projects", "foo", ".ozali", "knowledge");
+  const result = toPortablePath(corrupt, project);
+  // No debe compactarse a ~... porque contiene ~ como segmento interno
+  assert.ok(!result.startsWith("~"), "path corrupto NO debe quedar como ~ portable");
+  assert.ok(path.isAbsolute(result), "path corrupto debe quedar como absoluto visible");
+});
+
+test("update limpia knowledgeRepo corrupto con ~ interno", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    // Corromper el config simulando un path legacy con doble ~
+    const cfgPath = path.join(dir, ".ozali", "config.json");
+    const home = os.homedir();
+    const corrupt = path.join(home, path.relative(home, dir), "~", path.relative(home, dir), ".ozali", "knowledge");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.knowledgeRepo = "~" + corrupt.slice(home.length);
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    // update debe re-normalizar y dejarlo limpio (relativo al proyecto)
+    run(["update"], dir);
+    const fixed = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    assert.ok(!fixed.knowledgeRepo.includes(path.sep + "~"), "update limpia ~ interno");
+    assert.ok(!fixed.knowledgeRepo.startsWith("~") || !fixed.knowledgeRepo.includes(path.sep + "~"), "no queda path corrupto");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("init guarda knowledgeRepo como path portable", () => {
   const dir = tmpProject();
   try {

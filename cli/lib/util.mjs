@@ -206,20 +206,38 @@ export function nodeMajor() {
  */
 export function toPortablePath(absPath, base = null) {
   if (!absPath) return absPath;
+  // Expandir ~ antes de normalizar: path.resolve/fs.realpathSync no entienden ~
+  let input = absPath;
+  const home = os.homedir();
+  if (input.startsWith("~") && home) {
+    const rest = input.slice(1);
+    input = home + (rest.startsWith(path.sep) || rest === "" ? rest : path.sep + rest);
+  }
   // Normalizar con realpath para resolver symlinks (macOS: /var → /private/var)
   let normalized;
-  try { normalized = fs.realpathSync(absPath); } catch { normalized = path.resolve(absPath); }
-  const home = os.homedir();
-  // 1) home-relative → ~
-  if (home && (normalized === home || normalized.startsWith(home + path.sep))) {
-    return "~" + normalized.slice(home.length);
-  }
-  // 2) base-relative
+  try { normalized = fs.realpathSync(input); } catch { normalized = path.resolve(base || process.cwd(), input); }
+  // 1) base-relative (preferido sobre home-relative: más portable entre máquinas)
   if (base) {
     let baseNorm;
     try { baseNorm = fs.realpathSync(base); } catch { baseNorm = path.resolve(base); }
     if (normalized.startsWith(baseNorm + path.sep)) {
-      return path.relative(baseNorm, normalized);
+      const rel = path.relative(baseNorm, normalized);
+      // Defensa: si el relativo contiene ~ como segmento (incluyendo al inicio), el path
+      // está corrupto (por un bug previo donde path.resolve trató ~ como directorio literal).
+      const hasTildeSegment = rel.includes(path.sep + "~") || rel.endsWith(path.sep + "~") || rel.startsWith("~");
+      if (!hasTildeSegment) {
+        return rel;
+      }
+    }
+  }
+  // 2) home-relative → ~
+  if (home && (normalized === home || normalized.startsWith(home + path.sep))) {
+    const suffix = normalized === home ? "" : normalized.slice(home.length);
+    // Defensa: si el suffix contiene ~ como segmento de directorio, el path está corrupto
+    // (por un bug previo donde path.resolve trató ~ como directorio literal). No lo
+    // compactamos a ~; devolvemos el absoluto para que sea visible y reparable.
+    if (!suffix.includes(path.sep + "~") && !suffix.endsWith(path.sep + "~")) {
+      return "~" + suffix;
     }
   }
   // 3) absoluto legacy

@@ -14,7 +14,8 @@
 
 | Versión | Novedad |
 |---------|---------|
-| **v0.15.0** | **Clasificación cognitiva de agentes**: cada subagente CDK tiene un `model:` (`low`/`medium`/`high`) que se resuelve a modelo real de Claude u opencode vía `.ozali/config.json`. Reglas híbridas para `project-documenter` (técnico vs sencillo) y `tester` (ejecución vs diagnóstico). Configuración local `.ozali/config.local.json`. `ozali doctor` detecta si el config fue editado después de generar los subagentes. |
+| **v0.16.0** | **Verificación real del plugin Engram MCP + fix de corrupción de `knowledgeRepo`**: `ozali doctor`/`init`/`update`/`install-engram` ahora leen `~/.claude/plugins/installed_plugins.json` y distinguen entre "plugin no instalado" y "instalado pero deshabilitado", con mensajes explícitos y pasos exactos para habilitarlo (`/plugin install engram@engram`). Fix en `toPortablePath` para expandir `~` antes de `path.resolve`, preferir `base-relative` sobre `home-relative`, y defenderse de paths corruptos con `~` interno. Handshake Engram en `ozali-jarvis` y skill `ozali` para detectar MCP inactivo al inicio de cada sesión. |
+| v0.15.0 | Clasificación cognitiva de agentes: cada subagente CDK tiene un `model:` (`low`/`medium`/`high`) que se resuelve a modelo real de Claude u opencode vía `.ozali/config.json`. Reglas híbridas para `project-documenter` (técnico vs sencillo) y `tester` (ejecución vs diagnóstico). Configuración local `.ozali/config.local.json`. `ozali doctor` detecta si el config fue editado después de generar los subagentes. |
 | v0.14.0 | Dashboard `ozali dashboard`, checkpoints obligatorios entre fases CDK, reanudación automática de hitos, micro-checkpoints intra-fase. Co-authored-by automático en `ozali-commit`. |
 | v0.13.0 | Cloud sync auto (`ozali sync --auto`), workspace multi-repo, `ozali audit --tui`, Engram Cloud con enrolamiento, deploy guides VPS y GCloud. |
 | v0.12.0 | Skill `skill-generator`, CDK contrato v2 (seguridad PII + integración skill-generator), `ozali doctor --fix`, `ozali init --knowledge-only`. |
@@ -153,6 +154,11 @@ instalarlo, pasa `--no-engram` (arranca en modo `docs`). Más tarde puedes insta
 `ozali install-engram` bajo demanda. Opcionalmente habilita **Engram Cloud**
 (réplica de equipo opt-in) además del git-sync.
 
+> **Gotcha conocido (Engram MCP):** a veces el binario `engram` está en PATH y el marketplace está
+> añadido, pero el plugin `engram@engram` no aparece en `/mcp`. Eso ocurre cuando el plugin está
+> **deshabilitado** en Claude Code (`/plugin`). `ozali doctor` lo detecta y avisa; la solución rápida
+> está en [`docs/troubleshooting/engram-mcp-no-carga.md`](docs/troubleshooting/engram-mcp-no-carga.md).
+
 `init` también crea **ozali-jarvis**, un **orquestador always-on**: persona en `CLAUDE.md`/`AGENTS.md`
 + subagente + hooks de recordatorio que hace que el agente, **en toda sesión y sin necesidad de
 `/cdk`**, recupere contexto de Engram, registre el trabajo del equipo (memoria en contexto) y delegue
@@ -181,6 +187,7 @@ Claude Code y opencode (perfiles de permisos para ambos en
 | Desplegar Engram Cloud (VPS) | [docs/deploy-cloud-vps.md](docs/deploy-cloud-vps.md) |
 | Desplegar Engram Cloud (Google Cloud) | [docs/deploy-cloud-gcloud.md](docs/deploy-cloud-gcloud.md) |
 | Integración con Obsidian | [docs/obsidian-integration.md](docs/obsidian-integration.md) |
+| Troubleshooting: Engram MCP no carga | [docs/troubleshooting/engram-mcp-no-carga.md](docs/troubleshooting/engram-mcp-no-carga.md) |
 | Skill bootstrap | [skill/SKILL.md](skill/SKILL.md) |
 | Calibración de testing + TDD | [skill/references/calibration-blueprint.md](skill/references/calibration-blueprint.md) |
 | Contrato y versión de `cdk` | [skill/references/cdk-contract.md](skill/references/cdk-contract.md) |

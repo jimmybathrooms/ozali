@@ -72,6 +72,19 @@ Al final de **cada corrida** se escriben los **3 documentos** de registro (ver
 
 Antes de nada, verifica si hay un **hito pendiente** de `cdk` que necesite reanudarse.
 
+### 0.0 Handshake Engram (detección temprana)
+
+1. Intenta `mem_current_project`. Si la herramienta **no existe** o devuelve error
+   (las tools `mem_*` no están cargadas), muestra al usuario:
+   > ⚠️ Engram MCP no está activo. Las tools `mem_*` no están disponibles.  
+   > Para activar memoria persistente, abre `/plugin` en Claude Code, instala `engram@engram`
+   > (Enable / "instalar para mí") y reinicia Claude Code.  
+   > Hasta entonces, todo funciona en modo `docs` (sin memoria acumulativa).
+   - Registra en la bitácora: *"Engram no disponible — modo docs."*
+   - **No bloquees** el flujo; continúa con el fallback a docs.
+2. Si responde pero el proyecto no coincide con `.engram/config.json`, corrige
+   `.engram/config.json` o usa el nombre que devuelva Engram.
+
 ### 0.1 Reanudación (checkpoint de estado)
 
 1. **Buscar estado en Engram:** `mem_search(query: "cdk/{hito}/state", project: "{project}")`.
