@@ -94,6 +94,47 @@ export function detectEngramPluginInstalled() {
   }
 }
 
+/**
+ * Verifica si Engram MCP está configurado en opencode.
+ * Revisa opencode.json global y proyecto (incluyendo .jsonc).
+ */
+export function detectEngramOpencode(cwd) {
+  const candidates = [
+    path.join(cwd, "opencode.json"),
+    path.join(cwd, "opencode.jsonc"),
+    path.join(HOME, ".config", "opencode", "opencode.json"),
+    path.join(HOME, ".config", "opencode", "opencode.jsonc"),
+  ];
+  for (const p of candidates) {
+    if (!exists(p)) continue;
+    try {
+      const txt = fs.readFileSync(p, "utf8");
+      // Simple JSONC comment stripping for parsing
+      const cleaned = txt.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      const data = JSON.parse(cleaned);
+      if (data.mcp && data.mcp.engram) {
+        const enabled = data.mcp.engram.enabled !== false;
+        return {
+          configured: true,
+          enabled,
+          path: p,
+          detail: enabled ? `habilitado en ${path.basename(p)}` : `deshabilitado en ${path.basename(p)}`,
+        };
+      }
+      if (data.mcpServers && data.mcpServers.engram) {
+        const enabled = data.mcpServers.engram.enabled !== false;
+        return {
+          configured: true,
+          enabled,
+          path: p,
+          detail: enabled ? `habilitado en ${path.basename(p)} (mcpServers)` : `deshabilitado en ${path.basename(p)} (mcpServers)`,
+        };
+      }
+    } catch { /* ignore parse errors */ }
+  }
+  return { configured: false, enabled: false, path: null, detail: "no configurado en opencode" };
+}
+
 /** Detecta si Obsidian está instalado. Devuelve { installed, path } por SO. */
 export function detectObsidian() {
   const plat = process.platform;
@@ -180,6 +221,7 @@ export function detectAll(cwd) {
     skillGenerator: detectInstalledSkillGenerator(cwd),
     engram: detectEngram(),
     engramPlugin: detectEngramPluginInstalled(),
+    engramOpencode: detectEngramOpencode(cwd),
     obsidian: detectObsidian(),
     cloud: detectCloud(cwd),
     testing: detectTesting(cwd),

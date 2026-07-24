@@ -225,8 +225,11 @@ export async function init(cwd, opts) {
       info(`Engram ${c.bold(versionCheck.latest)} está disponible pero aún en cooldown de seguridad (24h). Se activará el ${new Date(new Date(versionCheck.publishedAt).getTime() + 24*60*60*1000).toLocaleDateString()}.`);
     }
     // Verificar que el plugin MCP esté realmente habilitado (no solo el binario)
-    if (!env.engramPlugin.enabled) {
+    if ((agent === "claude-code" || agent === "both") && !env.engramPlugin.enabled) {
       warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+    }
+    if ((agent === "opencode" || agent === "both") && !env.engramOpencode.enabled) {
+      warnEngramOpencodeStatus(env.engramOpencode);
     }
   } else {
     warn("Engram no está instalado.");
@@ -761,6 +764,29 @@ function warnEngramPluginStatus(plugin, label = "Claude Code") {
   return true;
 }
 
+/**
+ * Warning reutilizable sobre el estado de Engram MCP en opencode.
+ * Devuelve true si emitió warning (es decir, no está configurado o deshabilitado).
+ */
+function warnEngramOpencodeStatus(plugin) {
+  if (!plugin.configured) {
+    warn(`Engram MCP: no está configurado en opencode.`);
+    info(`  El binario engram está en PATH, pero eso no basta. opencode no levanta el MCP`);
+    info(`  hasta que esté configurado en opencode.json (proyecto o global).`);
+    info(`  → Corre en tu terminal:`);
+    info(`     ${c.bold("engram setup opencode")}`);
+  } else if (!plugin.enabled) {
+    warn(`Engram MCP: está configurado en opencode pero NO habilitado.`);
+    info(`  → Revisa opencode.json y asegura que ${c.bold("mcp.engram.enabled")} sea true.`);
+  } else {
+    return false;
+  }
+  info(`  → Reinicia opencode para recargar los MCP.`);
+  info(`  → Si tras habilitarlo el MCP aparece 'failed', asegura que ~/.local/bin esté en tu PATH:`);
+  info(`     ${c.dim('export PATH="$HOME/.local/bin:$PATH"')}`);
+  return true;
+}
+
 function printEngramManualInstructions(agent) {
   const plat = process.platform;
   info("Para activar memoria buscable/acumulativa (modo " + c.bold("hybrid") + "):");
@@ -1251,9 +1277,19 @@ export async function doctor(cwd, opts = {}) {
   if (env.engram.available) {
     const online = tryExec("engram", ["doctor"], { cwd }) !== null;
     add("Engram en línea", online, online ? "engram doctor OK" : "engram doctor no responde");
-    add("Engram MCP plugin", env.engramPlugin.enabled, env.engramPlugin.enabled ? env.engramPlugin.detail : env.engramPlugin.detail);
-    if (!env.engramPlugin.enabled) {
-      warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+    const agent = (cfg && cfg.agent) || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
+      : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
+    if (agent === "claude-code" || agent === "both") {
+      add("Engram MCP plugin", env.engramPlugin.enabled, env.engramPlugin.enabled ? env.engramPlugin.detail : env.engramPlugin.detail);
+      if (!env.engramPlugin.enabled) {
+        warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+      }
+    }
+    if (agent === "opencode" || agent === "both") {
+      add("Engram MCP opencode", env.engramOpencode.enabled, env.engramOpencode.enabled ? env.engramOpencode.detail : env.engramOpencode.detail);
+      if (!env.engramOpencode.enabled) {
+        warnEngramOpencodeStatus(env.engramOpencode);
+      }
     }
   }
   const jarvis = detectJarvis(cwd);
@@ -1578,8 +1614,11 @@ export async function update(cwd, opts = {}) {
       info(`Engram ${c.bold(versionCheck.latest)} está disponible pero aún en cooldown de seguridad (24h). Se activará el ${new Date(new Date(versionCheck.publishedAt).getTime() + 24*60*60*1000).toLocaleDateString()}.`);
     }
     // Verificar estado real del plugin MCP (no solo el binario)
-    if (!env.engramPlugin.enabled) {
+    if ((agent === "claude-code" || agent === "both") && !env.engramPlugin.enabled) {
       warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+    }
+    if ((agent === "opencode" || agent === "both") && !env.engramOpencode.enabled) {
+      warnEngramOpencodeStatus(env.engramOpencode);
     }
   }
 
@@ -1757,8 +1796,11 @@ export async function installEngramCmd(cwd, opts) {
   }
 
   // Verificar que el plugin MCP esté habilitado (no solo el binario y el marketplace)
-  if (!env.engramPlugin.enabled) {
+  if ((agent === "claude-code" || agent === "both") && !env.engramPlugin.enabled) {
     warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+  }
+  if ((agent === "opencode" || agent === "both") && !env.engramOpencode.enabled) {
+    warnEngramOpencodeStatus(env.engramOpencode);
   }
 
   // Actualizar config de ozali si existe

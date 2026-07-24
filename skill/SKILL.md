@@ -89,9 +89,14 @@ Antes de nada, verifica si hay un **hito pendiente** de `cdk` que necesite reanu
 
 1. **Buscar estado en Engram:** `mem_search(query: "cdk/{hito}/state", project: "{project}")`.
    Si hay resultado, recuperar con `mem_get_observation(id)`.
-2. **Buscar estado en disco:** leer `.ozali/.session-state.json` si existe (fallback cuando
+2. **Guard de rama:** al recuperar el `state` de Engram, comparar el campo `rama` (si existe)
+   contra la rama actual de git (`git rev-parse --abbrev-ref HEAD`):
+   - Si **diffieren** → **ignorar** el estado (tratar como hito nuevo). Registrar:
+     *"State de rama `{state.rama}` ignorado — estamos en `{rama_actual}`."*
+   - Si **coinciden** o el state no tiene campo `rama` (legado) → continuar con la evaluación.
+3. **Buscar estado en disco:** leer `.ozali/.session-state.json` si existe (fallback cuando
    Engram no está disponible o como respaldo).
-3. **Decidir:**
+4. **Decidir:**
    - Si **no hay estado** o la fase es `completed` → nuevo hito, continuar normalmente.
    - Si hay un hito **pendiente** (fase ≠ `completed`):
      - Preguntar al usuario: *"Tenés un hito pendiente en fase **[X]**. ¿Reanudar desde ahí?"*
@@ -420,10 +425,13 @@ Solo tras la aprobación de la Fase 5. Genera:
       si el agente se interrumpe. Ver [`references/engram-convention.md`](references/engram-convention.md) §4 y §4.5;
     - **micro-checkpoints intra-fase**: durante la ejecución, si el hito modifica **>5 archivos**,
       los `executioners` deben guardar micro-checkpoint en disco (`.ozali/.session-state.json`)
-      cada **3-5 archivos procesados**, registrando `archivos_procesados` y `last_updated`;
-    - **reanudación automática**: al iniciar un hito, buscar `cdk/{hito}/state` en Engram y
-      `.ozali/.session-state.json` en disco; si hay un hito pendiente (fase ≠ `completed`),
-      preguntar al usuario si desea reanudar desde la fase encontrada;
+      cada **3-5 archivos procesados**, registrando `archivos_procesados`, `last_updated` y `rama`;
+     - **reanudación automática**: al iniciar un hito, buscar `cdk/{hito}/state` en Engram y
+       `.ozali/.session-state.json` en disco. Al recuperar el `state` de Engram, aplicar el
+       **guard de rama**: comparar `rama` contra la rama actual (`git rev-parse --abbrev-ref HEAD`).
+       Si diffieren → **ignorar** el estado (tratar como hito nuevo). Si hay un hito pendiente
+       (fase ≠ `completed`) y la rama coincide, preguntar al usuario si desea reanudar desde
+       la fase encontrada;
     - en el **cierre del hito**, invocar la skill **`ozali-commit`** (instalada por el CLI en
       `.claude/skills/ozali-commit/`; **nunca** `copsis-commit`, nombre heredado de versiones
       anteriores) para generar el commit summary (feature→`feat`, bugfix→`fix`, hotfix→`hotfix`,
@@ -508,8 +516,9 @@ completo (naming, llamadas inline, degradación) en
 - **Al iniciar un hito** → handshake "Engram en línea" (`mem_current_project` + `mem_context`) +
   `mem_save_prompt` (captura el prompt real una vez) + `mem_search` de `cdk/{hito}/state`,
   `cdk/_project/testing-capabilities`, `cdk/_project/token-metrics` y `cdk/{hito}/*` →
-  `mem_get_observation` **selectivo** de lo relevante. Si hay `state` con pendientes, **reanuda**; con
-  `testing-capabilities` resuelve el modo TDD.
+  `mem_get_observation` **selectivo** de lo relevante. Al recuperar `state`, aplicar el **guard de
+  rama** (`state.rama` vs rama actual); si coinciden y hay pendientes, **reanuda**; si diffieren,
+  **ignorar** (tratar como hito nuevo). Con `testing-capabilities` resuelve el modo TDD.
 - **Recall-first (ahorro de tokens/contexto)** → antes de releer/re-analizar, reusar el
   `analisis`/`resumen-tecnico` previo si su `ultimo_commit` sigue vigente (guard de staleness); si el
   código cambió, re-analizar solo el delta. Recuperación selectiva y restauración tras compactación

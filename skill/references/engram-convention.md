@@ -182,6 +182,7 @@ content: |
   fase: {analysis_done | plan_approved | execution_done | testing_done | completed}
   strict_tdd: {true|false}
   modo: {normal | --auto}
+  rama: {branch}          # rama git donde se escribió el state
   tareas:
     completadas: [t1, t2]
     pendientes: [t3, t4]
@@ -200,9 +201,25 @@ content: |
 | `testing_done` | Testing validado | `mem_update` de `state` con `fase: testing_done`, resultado de pruebas |
 | `completed` | Hito cerrado, documentación lista | `mem_save` de `resumen-tecnico` + `mem_session_summary`, **borrar `state`** (hito limpio) |
 
+**Guard de rama (anti-desfase entre ramas):**
+
+Al recuperar `state`, el orchestrator **debe verificar que `rama` coincide con la rama actual
+de git** (`git rev-parse --abbrev-ref HEAD`).
+
+- Si **coincide** → reanudar normalmente (hito pendiente).
+- Si **diffiere** → **ignorar** el estado de Engram (tratar como hito nuevo). Registrar en la
+  bitácora: *"State recuperado de rama `{state.rama}` pero estamos en `{rama_actual}` → se
+  ignora para evitar desfase entre ramas."*.
+- Si **no hay `rama` en el state** (legado) → reanudar con advertencia: *"State sin campo
+  `rama` (legado). Reanudando, pero verifica que no haya cambiado de rama."*.
+
+> **Por qué:** Engram es a nivel de proyecto, no de rama. Si un dev migra `cdk` en `feature-A`,
+> cambia a `master` (donde `cdk` aún es legado) y recupera el `state` de `feature-A`, el agente
+> creería que `cdk` ya está migrado cuando el disco contradice la memoria.
+
 **Recuperación (2 pasos):** `mem_search("cdk/{hito}/state")` → `mem_get_observation(id)` → parsear
-YAML → restaurar. Si no hay `state`, es un hito nuevo. Si la fase es `completed`, ignorar (hito
-ya cerrado).
+YAML → **guard de rama** → restaurar. Si no hay `state`, es un hito nuevo. Si la fase es
+`completed`, ignorar (hito ya cerrado).
 
 ---
 
@@ -227,6 +244,7 @@ tolerante a fallos de red.
   "fase": "execution_done",
   "strict_tdd": true,
   "modo": "normal",
+  "rama": "feature/cobranza",
   "tareas": {
     "completadas": ["t1", "t2"],
     "pendientes": ["t3"]
@@ -244,6 +262,8 @@ tolerante a fallos de red.
 - El archivo es **sobrescrito** (no append-only) — siempre refleja el estado actual.
 - Al reanudar, `cdk` lee este archivo **además** del `state` de Engram. Si ambos existen,
   usa el más reciente (`last_updated`).
+- **Guard de rama:** al leer `.session-state.json`, comparar `rama` contra la rama actual.
+  Si diffieren → **ignorar** el archivo (tratar como hito nuevo).
 - Al cerrar el hito (`completed`), el orchestrator **borra** `.session-state.json`.
 - Si no hay Engram (modo `docs`), este archivo es la **única fuente de reanudación**.
 
