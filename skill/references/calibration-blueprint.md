@@ -78,7 +78,23 @@ en `.ai/context/tech-stack.md`:
 **Ciclo:** RED → GREEN → REFACTOR (test-first) cuando Strict TDD = true.
 ```
 
-**b) Engram (buscable / acumulable):** espeja como artefacto, ver
+**b) Config de ozali (fuente de verdad para `cdk`):** actualiza `.ozali/config.json` → `testing`:
+
+```json
+{
+  "testing": {
+    "strict_tdd": true,
+    "runner": "vitest",
+    "greenCommand": "pnpm test",
+    "singleTestCommand": "pnpm test --run <patrón>"
+  }
+}
+```
+
+Esto permite que `cdk` consulte la calibración sin parsear markdown y que `ozali doctor`
+muestre el estado de testing directamente desde el config.
+
+**c) Engram (buscable / acumulable):** espeja como artefacto, ver
 [`engram-convention.md`](engram-convention.md):
 
 ```

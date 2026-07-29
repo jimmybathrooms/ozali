@@ -23,6 +23,24 @@ export function pkgVersion() {
   }
 }
 
+/** Parsea una versión semver "x.y.z" en {major, minor, patch} (enteros). */
+export function parseSemver(v) {
+  const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return { major: 0, minor: 0, patch: 0 };
+  return { major: parseInt(m[1], 10), minor: parseInt(m[2], 10), patch: parseInt(m[3], 10) };
+}
+
+/** Compara dos versiones semver. Devuelve {diff, ahead} donde diff puede ser
+ *  'same', 'patch', 'minor', 'major'. */
+export function compareSemver(a, b) {
+  const va = parseSemver(a);
+  const vb = parseSemver(b);
+  if (va.major !== vb.major) return { diff: "major", ahead: va.major > vb.major };
+  if (va.minor !== vb.minor) return { diff: "minor", ahead: va.minor > vb.minor };
+  if (va.patch !== vb.patch) return { diff: "patch", ahead: va.patch > vb.patch };
+  return { diff: "same", ahead: false };
+}
+
 /**
  * Nombre del asset de release de Engram para un SO/arch/versión dados.
  * Convención oficial: engram_<version>_<os>_<arch>.<ext> (.tar.gz en linux/darwin, .zip en windows).

@@ -182,8 +182,8 @@ sin modificar el config del repo (igual que `.claude/settings.local.json` sobres
 
 - **Ruta:** `.ozali/config.local.json`
 - **Merge:** shallow merge; las claves de primer nivel en `.local` ganan sobre el base.
-- **Uso típico:** ajustar `agents.models` (modelos de agentes) o `knowledgeRepo` para tu
-  entorno local sin tocar el config compartido del equipo.
+- **Uso típico:** ajustar `agents.models` (modelos de agentes), `knowledgeRepo`, `mode`, `testing`
+  o cualquier clave de primer nivel para tu entorno local sin tocar el config compartido del equipo.
 - **Advertencia:** los cambios en `agents.models` **no surten efecto** en los subagentes ya
   generados hasta que se **regenera o actualiza `cdk`** (correr `ozali update` o invocar
   `ozali` de nuevo). `ozali doctor` detecta esta condición y te avisa.
@@ -273,10 +273,13 @@ el documento 1 (análisis).
    | Sin marcador, pero **existe runner de tests** | **`true`** (default: test-first) |
    | **No hay runner de tests** | `false` + explica que no está disponible y qué falta |
 
-3. **Persiste la calibración** como artefacto `testing-capabilities`:
-   - en la fuente de verdad: sección **"Testing & TDD"** dentro de `.ai/context/tech-stack.md`
+3. **Persiste la calibración** en tres lugares:
+   - **Fuente de verdad:** sección **"Testing & TDD"** dentro de `.ai/context/tech-stack.md`
      (tabla de capacidades + `strict_tdd` + comandos verdes);
-   - en **Engram** (cuando esté disponible): `cdk/_project/testing-capabilities`
+   - **Config de ozali:** actualiza `.ozali/config.json` → `testing` con `strict_tdd`, `runner`,
+     `greenCommand` y `singleTestCommand`. Esto permite que `cdk` lea la calibración sin releer
+     el markdown y que `ozali doctor` la muestre sin parsear.
+   - **Engram** (cuando esté disponible): `cdk/_project/testing-capabilities`
      (ver [`references/engram-convention.md`](references/engram-convention.md)).
 
 4. **Si falta información** para fijar el umbral de "verde" (qué comando corre las pruebas, qué
@@ -306,6 +309,9 @@ cognitiva y modelo asignado** está en [`references/agents-blueprint.md`](refere
 
 > **Resolución de modelo:** el nivel (`low`, `medium`, `high`) se resuelve a modelo real
 > consultando `.ozali/config.json` → `agents.models.{claude|opencode}.{low|medium|high}`.
+> Si el config no tiene `agents` (repos inicializados antes de v0.16.2), usar defaults por
+> agente: Claude = `claude-haiku-4-5` / `claude-sonnet-4-5` / `claude-opus-4`;
+> opencode = `kimi-k3` / `deepseek-v4-pro` / `mimo-v2.5`.
 > El orquestador debe hacer este lookup al invocar cada subagente.
 
 Si la fuente de verdad **no** aporta suficiente para definir una identidad (responsabilidad,
@@ -369,7 +375,9 @@ Solo tras la aprobación de la Fase 5. Genera:
     - **estampar en el frontmatter** `model: medium` (el orquestador `cdk` opera en nivel medio);
     - **resolver modelo de subagentes:** el orquestador debe, al invocar cada subagente, leer
       su `model:` del frontmatter y resolverlo a modelo real vía `.ozali/config.json` →
-      `agents.models.{claude|opencode}.{low|medium|high}`;
+      `agents.models.{claude|opencode}.{low|medium|high}`. Si `agents` no existe, usar
+      defaults: Claude = `claude-haiku-4-5` / `claude-sonnet-4-5` / `claude-opus-4`;
+      opencode = `kimi-k3` / `deepseek-v4-pro` / `mimo-v2.5`;
    - declarar que ayuda a **generar código** (nuevo componente, fix de bug, análisis de impacto)
      respetando la fuente de verdad y los estándares del proyecto;
     - orquestar los 8 subagentes según la fase del trabajo;

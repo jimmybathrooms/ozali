@@ -220,6 +220,88 @@ Cada agente del ecosistema `ozali` / `cdk` se clasifica por **categoría cogniti
 >
 > **Configuración local:** `.ozali/config.local.json` hace shallow merge sobre `.ozali/config.json` (igual que `.claude/settings.local.json`). Úsalo para ajustar modelos sin tocar el config compartido del equipo.
 
+### Formato canónico de `.ozali/config.json`
+
+`ozali init` genera este archivo con la siguiente estructura mínima (v0.16.2+):
+
+```json
+{
+  "version": "0.16.2",
+  "knowledgeRepo": "~/.ozali/knowledge",
+  "project": "nombre-repo",
+  "mode": "hybrid",
+  "docsPath": ".ozali/docs",
+  "metricsPath": ".ozali/metrics",
+  "sessionState": ".ozali/.session-state.json",
+  "createdAt": "2026-...",
+  "agents": {
+    "models": {
+      "claude": {
+        "low": "claude-haiku-4-5",
+        "medium": "claude-sonnet-4-5",
+        "high": "claude-opus-4"
+      },
+      "opencode": {
+        "low": "kimi-k3",
+        "medium": "deepseek-v4-pro",
+        "high": "mimo-v2.5"
+      },
+      "mapping": { ... },
+      "hybridRules": { ... }
+    }
+  },
+  "testing": {
+    "strict_tdd": false,
+    "runner": null,
+    "greenCommand": null,
+    "singleTestCommand": null
+  }
+}
+```
+
+- `version` — versión del CLI que generó el config.
+- `knowledgeRepo` — ruta portable al repo de conocimiento aislado.
+- `project` — nombre del proyecto (derivado de la carpeta git).
+- `mode` — modo de memoria: `hybrid` (docs + Engram) o `docs` (sin Engram). Se genera automáticamente desde v0.16.2.
+- `docsPath` — ruta del histórico aislado de documentación por hito.
+- `metricsPath` — ruta de métricas (tokens, telemetría).
+- `sessionState` — ruta del archivo de estado de sesión para reanudación de hitos.
+- `agents` — configuración de modelos para cada subagente; se genera automáticamente desde v0.16.2.
+- `testing` — calibración de testing y TDD; se genera automáticamente con defaults y se
+  calibra en Fase 3.5 del bootstrap. El flujo de llenado es:
+  1. **`ozali init`** genera `testing` con valores nulos (`strict_tdd: false`, runners nulos).
+  2. **Skill `ozali` (Fase 3.5)** detecta el stack real y escribe `.ozali/config.json` → `testing`.
+  3. **Skill `cdk`** lee `testing` del config como primera fuente; si está vacío, recurre a
+     `.ai/context/tech-stack.md` o Engram.
+  4. **CLI `ozali doctor`/`update`** sincronizan inversamente desde `.ai/context/tech-stack.md`
+     si ya existe (para repos calibrados antes de v0.16.2).
+
+- `frozen` — **red de seguridad** (v0.16.3+): si es `true`, `ozali update` no toca las skills
+  (`ozali`, `ozali-commit`, `skill-generator`). Solo actualiza el config JSON, permisos y jarvis.
+  Útil para repos en producción que no quieren breaking changes por un update global accidental.
+  Para forzar: `ozali update --skills`.
+
+### Red de seguridad de `ozali update` (v0.16.3+)
+
+Como ozali está en desarrollo activo, `ozali update` puede traer cambios breaking. El CLI
+implementa **3 capas de protección**:
+
+1. **Semver Guard** (Capa 1): antes de copiar skills, compara la versión del config con la del
+   CLI. Si hay un **bump mayor** (ej. 0.16.x → 0.17.0), pide confirmación interactiva.
+   En modo `--yes` permite el update pero muestra un warning.
+2. **Backup automático** (Capa 2): antes de sobreescribir cada skill, el CLI copia la versión
+   anterior a `.ozali/backups/skills/v{version}/{skill}/`. Si algo se rompe, recuperás con:
+   ```bash
+   ozali update --rollback
+   ```
+3. **Modo frozen** (Capa 3): agregá `"frozen": true` a `.ozali/config.json` y `ozali update`
+   **nunca** tocará skills (solo config, permisos y jarvis). Para forzar el update de skills:
+   ```bash
+   ozali update --skills
+   ```
+
+> **Nota:** repos inicializados antes de v0.16.2 pueden tener `memoryMode` (legacy) en vez de `mode`. Corre `ozali update` o `ozali doctor --fix` para migrar al formato canónico completo.
+
 > Linaje: `ozali` se nutre de conceptos de
 > [gentle-ai](https://github.com/Gentleman-Programming/gentle-ai) (Engram, calibración SDD/TDD,
 > distribución plug-n-play).

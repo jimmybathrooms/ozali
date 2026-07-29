@@ -7,7 +7,7 @@ import {
   SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
-  toPortablePath, fromPortablePath,
+  toPortablePath, fromPortablePath, parseSemver, compareSemver,
 } from "./util.mjs";
 import { detectAll, detectSourceOfTruth, detectWorkspace, detectReferences } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
@@ -129,6 +129,79 @@ function normalizeConfig(cfg, cwd) {
   return cfg;
 }
 
+/** Resuelve el modo de memoria leyendo `mode` o el legacy `memoryMode`. */
+function resolveMode(cfg) {
+  if (!cfg) return "docs";
+  return cfg.mode || cfg.memoryMode || "docs";
+}
+
+/** Devuelve defaults de rutas de ozali. */
+function defaultPathsConfig() {
+  return {
+    docsPath: ".ozali/docs",
+    metricsPath: ".ozali/metrics",
+    sessionState: ".ozali/.session-state.json",
+  };
+}
+
+/** Devuelve defaults de testing (se calibra en Fase 3.5 del bootstrap). */
+function defaultTestingConfig(env = {}) {
+  const runners = env.testing && env.testing.runners ? env.testing.runners : [];
+  return {
+    strict_tdd: runners.length > 0,
+    runner: runners.length > 0 ? runners.join(", ") : null,
+    greenCommand: null,
+    singleTestCommand: null,
+  };
+}
+
+/** Devuelve la sección agents con defaults por agente (vigente desde v0.15.0). */
+function defaultAgentsConfig() {
+  return {
+    models: {
+      claude: {
+        low: "claude-haiku-4-5",
+        medium: "claude-sonnet-4-5",
+        high: "claude-opus-4",
+      },
+      opencode: {
+        low: "kimi-k3",
+        medium: "deepseek-v4-pro",
+        high: "mimo-v2.5",
+      },
+      mapping: {
+        "project-analyzer": "high",
+        "project-owner": "high",
+        ozali: "high",
+        executioners: "high",
+        "project-orchestrator": "medium",
+        "ozali-jarvis": "medium",
+        cdk: "medium",
+        "project-manager": "medium",
+        "project-proposer": "medium",
+        "skill-generator": "medium",
+        tester: "medium",
+        "project-documenter": "medium",
+        "ozali-commit": "low",
+      },
+      hybridRules: {
+        "project-documenter": {
+          description:
+            "Si la documentación es técnica (arquitectura, análisis de impacto, resumen técnico), usa high. Si es sencilla (prompt de entrada, resumen de usuario), usa medium.",
+          highTriggers: ["03-resumen-tecnico.md", "05-bitacora-ejecucion.md"],
+          mediumTriggers: ["01-prompt-entrada.md", "04-resumen-usuario.md", "06-uso-tokens.md"],
+        },
+        tester: {
+          description:
+            "Ejecutar tests y reportar pass/fail usa low. Si hay fallos, re-interpretar la causa raíz usa medium.",
+          lowPhase: "ejecucion-de-tests",
+          mediumPhase: "diagnostico-de-fallos",
+        },
+      },
+    },
+  };
+}
+
 /**
  * Inicializa (o reconfigura) únicamente el repo de conocimiento y el config mínimo.
  * Reutilizable por `init --knowledge-only`, `doctor --fix`, etc.
@@ -153,9 +226,19 @@ async function initKnowledgeRepo(cwd, opts, extraConfig = {}, explicitRepo = nul
     knowledgeRepo: toPortablePath(knowledgeRepo, cwd),
     project: projectName(cwd),
     createdAt: existing.createdAt || new Date().toISOString(),
+    mode: (existing && (existing.mode || existing.memoryMode)) || "docs",
+    frozen: existing.frozen !== undefined ? existing.frozen : false,
+    ...defaultPathsConfig(),
+    agents: (existing && existing.agents) ? existing.agents : defaultAgentsConfig(),
+    testing: (existing && existing.testing) ? existing.testing : defaultTestingConfig(),
     ...extraConfig,
   };
-  writeJSON(CONFIG_PATH(cwd), config);
+  // Normalizar: si extraConfig trajo memoryMode (legacy), convertir a mode.
+  if (config.memoryMode && !config.mode) {
+    config.mode = config.memoryMode;
+    delete config.memoryMode;
+  }
+  writeJSON(CONFIG_PATH(cwd), normalizeConfig(config, cwd));
   ok(`Config local escrita en ${c.bold(".ozali/config.json")} (repo de conocimiento configurado).`);
   return config;
 }
@@ -189,10 +272,10 @@ export async function init(cwd, opts) {
     { value: "both", label: "Ambos (Claude Code + opencode)" },
   ], { "claude-code": 0, opencode: 1, both: 2 }[agentDefault]);
 
-  // Scope
+  // Scope (default global para evitar duplicados)
   const scope = opts.scope || await select("¿Dónde instalo la skill?", [
-    { value: "project", label: `Proyecto (${c.dim(".claude/skills/ozali")})` },
     { value: "global", label: `Global (${c.dim("~/.claude/skills/ozali")})` },
+    { value: "project", label: `Proyecto (${c.dim(".claude/skills/ozali")})` },
   ], 0);
 
   // Repo de conocimiento (histórico aislado)
@@ -353,7 +436,7 @@ export async function init(cwd, opts) {
   }
 
   // 4-5) repo de conocimiento + config local (reutiliza helper)
-  const config = await initKnowledgeRepo(cwd, opts, { agent, scope, memoryMode, cloud }, knowledgeRepoRaw);
+  const config = await initKnowledgeRepo(cwd, opts, { agent, scope, mode: memoryMode, cloud }, knowledgeRepoRaw);
 
   // 6) Obsidian vault (init) — si Obsidian está instalado, inicializar el vault base
   if (env.obsidian.installed && !opts.dryRun) {
@@ -402,7 +485,8 @@ function checkEngramVersion() {
     const m = /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name || "");
     if (!m) continue;
     const latest = m[1];
-    if (compareSemver(latest, current) <= 0) break; // no hay nada más nuevo
+    const cmp = compareSemver(latest, current);
+    if (!cmp.ahead) break; // no hay nada más nuevo
     const published = r.published_at ? new Date(r.published_at).getTime() : 0;
     if (!published || now - published < COOLDOWN_MS) {
       // Versión muy reciente — mostrar como disponible pero con cooldown activo
@@ -415,16 +499,7 @@ function checkEngramVersion() {
   return { current, latest: current, canUpgrade: false };
 }
 
-/** Comparación semver simple: devuelve >0 si a>b, <0 si a<b, 0 si iguales. */
-function compareSemver(a, b) {
-  const pa = a.split(".").map((n) => parseInt(n, 10));
-  const pb = b.split(".").map((n) => parseInt(n, 10));
-  for (let i = 0; i < 3; i++) {
-    const na = pa[i] || 0, nb = pb[i] || 0;
-    if (na !== nb) return na - nb;
-  }
-  return 0;
-}
+
 
 /**
  * Instala Engram con la mejor ruta disponible para el SO actual.
@@ -1140,8 +1215,15 @@ async function workspaceUpdate(members, opts) {
   return failed > 0 ? 1 : 0;
 }
 
-/** Track 2 — instala la skill `ozali` en la raíz para calibrar miembros desde el workspace. */
+/** Track 2 — instala la skill `ozali` en la raíz para calibrar miembros desde el workspace.
+ *  Si ya existe la skill global, no duplica (evita duplicados del panel de skills).
+ */
 function ensureWorkspaceOzaliSkill(root) {
+  const globalSkill = path.join(HOME, ".claude", "skills", "ozali");
+  if (exists(globalSkill)) {
+    info(`Skill global ya existe (${c.dim(globalSkill)}). No se duplica en la raíz del workspace.`);
+    return;
+  }
   copyDir(SKILL_SRC, path.join(root, ".claude", "skills", "ozali"));
   ok(`Skill ${c.bold("ozali")} instalada en la raíz (${c.bold(".claude/skills/ozali")}) para calibrar miembros desde el workspace.`);
 }
@@ -1307,6 +1389,7 @@ export async function doctor(cwd, opts = {}) {
   const kRepoPortable = cfg && cfg.knowledgeRepo;
   const kRepoResolved = kRepoPortable ? fromPortablePath(kRepoPortable, cwd) : null;
   add("Repo de conocimiento", !!(kRepoResolved && exists(kRepoResolved)), kRepoResolved || "sin configurar (ozali init)");
+  add("Agentes configurados", !!(cfg && cfg.agents), cfg && cfg.agents ? "agents.models OK" : "sin agents (ozali update --fix)");
 
   // Strict TDD (de la fuente de verdad)
   const tdd = readStrictTdd(cwd, env.sot);
@@ -1376,6 +1459,28 @@ export async function doctor(cwd, opts = {}) {
       }
     }
 
+    // Fix 3: Agentes
+    const agentsRow = rows.find((r) => r.label === "Agentes configurados");
+    if (agentsRow && !agentsRow.good) {
+      const cfg2 = readJSON(CONFIG_PATH(cwd)) || {};
+      if (!cfg2.agents) {
+        cfg2.agents = defaultAgentsConfig();
+        writeJSON(CONFIG_PATH(cwd), normalizeConfig(cfg2, cwd));
+        ok("Configuración de agentes agregada a .ozali/config.json.");
+        agentsRow.good = true;
+        agentsRow.detail = "agents.models OK";
+      }
+    }
+
+    // Fix 4: Testing (sync desde tech-stack.md si existe)
+    const testingRow = rows.find((r) => r.label === "Runner de pruebas");
+    if (env.sot.found) {
+      const sync = syncTestingFromTechStack(cwd, env.sot);
+      if (sync.synced) {
+        info(`Sincronizado testing desde ${path.relative(cwd, path.join(env.sot.dir, "context", "tech-stack.md"))}: strict_tdd=${sync.strict_tdd}, runner=${sync.runner || "N/A"}, greenCommand=${sync.greenCommand || "N/A"}.`);
+      }
+    }
+
     const badAfterFix = rows.filter((r) => !r.good).length;
     console.log("");
     if (badAfterFix === 0) ok("Todos los problemas detectados fueron remediados.");
@@ -1384,8 +1489,8 @@ export async function doctor(cwd, opts = {}) {
   }
 
   // Auto-upgrade: si Engram acaba de instalarse y el config aún dice "docs", subir a hybrid.
-  if (cfg && cfg.memoryMode === "docs" && env.engram.available) {
-    cfg.memoryMode = "hybrid";
+  if (cfg && resolveMode(cfg) === "docs" && env.engram.available) {
+    cfg.mode = "hybrid";
     writeJSON(CONFIG_PATH(cwd), normalizeConfig(cfg, cwd));
     ok("Engram detectado → modo de memoria actualizado a " + c.bold("hybrid") + " en .ozali/config.json.");
   }
@@ -1502,6 +1607,126 @@ function readStrictTdd(cwd, sot) {
   return m ? { found: true, value: m[1].toLowerCase() } : { found: false };
 }
 
+/** Lee `.ai/context/tech-stack.md` y sincroniza `.ozali/config.json` → `testing`.
+ *  Parsea markdown tables de forma naive pero robusta para el formato de ozali.
+ */
+function syncTestingFromTechStack(cwd, sot) {
+  const f = path.join(cwd, sot.dir, "context", "tech-stack.md");
+  if (!exists(f)) return { synced: false };
+  const txt = fs.readFileSync(f, "utf8");
+  const strictMatch = txt.match(/Strict\s*TDD[:*\s]+(true|false)/i);
+  const strictTdd = strictMatch ? strictMatch[1].toLowerCase() === "true" : false;
+
+  // Buscar "Comando verde" en el markdown (puede estar en negrita, backticks, etc.)
+  const cmdMatch = txt.match(/Comando\s+verde[^:]*:\s*[`\*]*([^`\n\*]+)/i);
+  const greenCommand = cmdMatch ? cmdMatch[1].trim() : null;
+
+  // Buscar runner en tabla markdown: fila que empieza con | Runner ... |
+  let runner = null;
+  const lines = txt.split(/\r?\n/);
+  for (const line of lines) {
+    const m = line.match(/^\s*\|?\s*Runner[^|]*\|\s*([^|]+)/i);
+    if (m) {
+      runner = m[1].replace(/[`\*]/g, "").trim();
+      break;
+    }
+  }
+
+  const cfg = readJSON(CONFIG_PATH(cwd)) || {};
+  if (!cfg.testing) cfg.testing = defaultTestingConfig();
+  cfg.testing.strict_tdd = strictTdd;
+  if (runner) cfg.testing.runner = runner;
+  if (greenCommand) cfg.testing.greenCommand = greenCommand;
+  writeJSON(CONFIG_PATH(cwd), normalizeConfig(cfg, cwd));
+  return { synced: true, strict_tdd: strictTdd, runner, greenCommand };
+}
+
+// ---- seguridad: semver guard + backup + frozen --------------------------------
+
+/** Crea un backup de una skill antes de sobreescribirla.
+ *  El backup vive en `.ozali/backups/skills/v{version}/{skillName}/`.
+ *  Si la skill no existe, no hace nada (silencioso).
+ */
+function backupSkill(skillDir, version, cwd) {
+  if (!exists(skillDir)) return { backedUp: false, path: null, reason: "skill no existe" };
+  const skillName = path.basename(skillDir);
+  const backupDir = path.join(cwd, ".ozali", "backups", "skills", `v${version}`, skillName);
+  if (exists(backupDir)) {
+    return { backedUp: false, path: backupDir, reason: "backup ya existe" };
+  }
+  ensureDir(path.dirname(backupDir));
+  copyDir(skillDir, backupDir);
+  return { backedUp: true, path: backupDir };
+}
+
+/** Encuentra el backup más reciente de una skill (por semver descendente). */
+function findLatestSkillBackup(skillDir, cwd) {
+  const skillName = path.basename(skillDir);
+  const backupsBase = path.join(cwd, ".ozali", "backups", "skills");
+  if (!exists(backupsBase)) return null;
+  const versions = fs.readdirSync(backupsBase).filter((v) =>
+    exists(path.join(backupsBase, v, skillName, "SKILL.md"))
+  );
+  if (versions.length === 0) return null;
+  versions.sort((a, b) => {
+    const va = parseSemver(a.replace(/^v/, ""));
+    const vb = parseSemver(b.replace(/^v/, ""));
+    if (va.major !== vb.major) return vb.major - va.major;
+    if (va.minor !== vb.minor) return vb.minor - va.minor;
+    return vb.patch - va.patch;
+  });
+  return path.join(backupsBase, versions[0], skillName);
+}
+
+/** Restaura el backup más reciente de una skill. */
+function restoreSkillBackup(skillDir, cwd) {
+  const backupDir = findLatestSkillBackup(skillDir, cwd);
+  if (!backupDir) return { restored: false, reason: "sin backup" };
+  fs.rmSync(skillDir, { recursive: true, force: true });
+  copyDir(backupDir, skillDir);
+  return { restored: true, from: backupDir };
+}
+
+/** Decide si se deben actualizar skills considerando frozen + semver guard. */
+async function shouldUpdateSkills(cfg, opts, currentVersion, askFn) {
+  // Capa 3: frozen
+  if (cfg && cfg.frozen === true && !opts.skills) {
+    return {
+      shouldUpdate: false,
+      reason: "frozen",
+      message: "Modo frozen activo. Skills NO actualizadas. Usa --skills para forzar.",
+    };
+  }
+
+  // Capa 1: semver guard
+  if (cfg && cfg.version) {
+    const cmp = compareSemver(cfg.version, currentVersion);
+    if (cmp.diff === "major") {
+      if (!opts.yes && askFn) {
+        const confirmed = await askFn(
+          `Cambio de versión mayor detectado: ${cfg.version} → ${currentVersion}. Posibles breaking changes. ¿Actualizar skills?`,
+          false
+        );
+        return {
+          shouldUpdate: confirmed,
+          reason: confirmed ? "major-bump" : "user-cancel",
+          message: confirmed
+            ? `⚠️  Update forzado a través de cambio mayor (${cfg.version} → ${currentVersion}).`
+            : "Update cancelado por el usuario.",
+        };
+      }
+      // En modo --yes permitir pero advertir
+      return {
+        shouldUpdate: true,
+        reason: "major-bump",
+        message: `⚠️  Cambio mayor ${cfg.version} → ${currentVersion} (modo --yes). Revisa breaking changes antes de trabajar.`,
+      };
+    }
+  }
+
+  return { shouldUpdate: true, reason: "normal" };
+}
+
 // =========================================================== update ==========
 // Lleva una instalación existente al paquete actual: refresca la skill ozali (con sus
 // references), los perfiles de permisos y **crea/refresca ozali-jarvis** (clave para repos
@@ -1517,29 +1742,70 @@ export async function update(cwd, opts = {}) {
     return 1;
   }
 
+  const currentVersion = pkgVersion();
+
+  // --- rollback mode (Capa 2) ---
+  if (opts.rollback) {
+    if (!env.skill.installed) { warn("Sin skills para restaurar."); return 1; }
+    step("Rollback de skills");
+    let restored = 0;
+    for (const p of env.skill.paths) {
+      const r = restoreSkillBackup(p, cwd);
+      if (r.restored) { ok(`Skill ${c.bold(path.basename(p))} restaurada desde backup.`); restored++; }
+      else warn(`No hay backup para ${c.bold(path.basename(p))}.`);
+      // También restaurar ozali-commit y skill-generator del mismo backup base
+      const commitDir = path.join(path.dirname(p), "ozali-commit");
+      const rCommit = restoreSkillBackup(commitDir, cwd);
+      if (rCommit.restored) { ok(`Skill ozali-commit restaurada.`); restored++; }
+      const genDir = path.join(path.dirname(p), "skill-generator");
+      const rGen = restoreSkillBackup(genDir, cwd);
+      if (rGen.restored) { ok(`Skill skill-generator restaurada.`); restored++; }
+    }
+    info(restored > 0 ? `Restauradas ${restored} skills. Reinicia tu agente.` : "Nada que restaurar.");
+    return 0;
+  }
+
+  // --- semver guard + frozen (Capa 1 y 3) ---
+  const guard = await shouldUpdateSkills(cfg, opts, currentVersion, confirm);
+  if (!guard.shouldUpdate) {
+    info(guard.message);
+  } else if (guard.shouldUpdate === true && guard.reason === "major-bump") {
+    warn(guard.message);
+  }
+
   // 1) Skill ozali (incluye las references: la base desde la que el agente regenera cdk)
   //    + ozali-commit (commit convencional) + skill-generator como skills hermanas.
-  if (env.skill.installed) {
+  if (env.skill.installed && guard.shouldUpdate !== false) {
     for (const p of env.skill.paths) {
+      // Capa 2: backup antes de sobreescribir
+      const skillVersion = cfg?.version || "unknown";
+      const bak = backupSkill(p, skillVersion, cwd);
+      if (bak.backedUp) info(`Backup creado: ${path.relative(cwd, bak.path)}`);
       copyDir(SKILL_SRC, p);
-      ok(`Skill ozali actualizada: ${path.relative(cwd, p) || p} → v${pkgVersion()}`);
+      ok(`Skill ozali actualizada: ${path.relative(cwd, p) || p} → v${currentVersion}`);
       const commitDir = path.join(path.dirname(p), "ozali-commit");
       const freshCommit = !exists(commitDir);
+      const bakCommit = backupSkill(commitDir, skillVersion, cwd);
+      if (bakCommit.backedUp) info(`Backup creado: ${path.relative(cwd, bakCommit.path)}`);
       copyDir(COMMIT_SKILL_SRC, commitDir);
       ok(`Skill ozali-commit ${freshCommit ? "instalada" : "actualizada"}: ${path.relative(cwd, commitDir) || commitDir}`);
       const generatorDir = path.join(path.dirname(p), "skill-generator");
       const freshGenerator = !exists(generatorDir);
+      const bakGen = backupSkill(generatorDir, skillVersion, cwd);
+      if (bakGen.backedUp) info(`Backup creado: ${path.relative(cwd, bakGen.path)}`);
       copyDir(SKILL_GENERATOR_SRC, generatorDir);
       ok(`Skill skill-generator ${freshGenerator ? "instalada" : "actualizada"}: ${path.relative(cwd, generatorDir) || generatorDir}`);
     }
-  } else {
+  } else if (!env.skill.installed) {
     warn("Skill ozali no instalada en esta ruta (corre " + c.bold("ozali init") + " para instalarla).");
+  } else {
+    info("Skills no actualizadas (modo frozen o cancelado). Config y permisos sí se refrescan.");
   }
 
   // Agente/scope: del config; si falta, infiere del entorno.
   const agent = (cfg && cfg.agent) || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
     : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
-  const scope = (cfg && cfg.scope) || "project";
+  const scope = (cfg && cfg.scope) || "global";
 
   // 1b) Actualizar skills de ejecución en opencode si el agente lo requiere
   // Nota: ozali (bootstrap) no se instala localmente en opencode; el global es suficiente.
@@ -1633,7 +1899,17 @@ export async function update(cwd, opts = {}) {
   }
 
   // 5) versión del config
-  if (cfg) { cfg.version = pkgVersion(); cfg.updatedAt = new Date().toISOString(); writeJSON(cfgPath, normalizeConfig(cfg, cwd)); }
+  if (cfg) {
+    if (!cfg.agents) { cfg.agents = defaultAgentsConfig(); info("Agregando configuración de agentes por defecto a .ozali/config.json"); }
+    cfg.version = pkgVersion();
+    cfg.updatedAt = new Date().toISOString();
+    writeJSON(cfgPath, normalizeConfig(cfg, cwd));
+  }
+  // 5.5) Sync testing desde tech-stack.md si existe
+  if (cfg && env.sot.found) {
+    const sync = syncTestingFromTechStack(cwd, env.sot);
+    if (sync.synced) info(`Sincronizado testing desde tech-stack.md: strict_tdd=${sync.strict_tdd}, runner=${sync.runner || "N/A"}, greenCommand=${sync.greenCommand || "N/A"}.`);
+  }
   ok(`Instalación al día con ozali v${pkgVersion()}.`);
   return 0;
 }
@@ -1806,8 +2082,8 @@ export async function installEngramCmd(cwd, opts) {
   // Actualizar config de ozali si existe
   if (cfg) {
     let wrote = false;
-    if (cfg.memoryMode === "docs") {
-      cfg.memoryMode = "hybrid";
+    if (resolveMode(cfg) === "docs") {
+      cfg.mode = "hybrid";
       wrote = true;
       ok("Modo de memoria actualizado a " + c.bold("hybrid") + " en .ozali/config.json.");
     }
@@ -1903,7 +2179,7 @@ export async function sync(cwd, opts) {
     // 2) Engram: copiar los chunks del repo de conocimiento → .engram/ ANTES de importar
     //    (engram sync --import lee de .engram/ en el cwd; sin esta copia, un dev nuevo
     //     no importaría nada).
-    if (cfg.memoryMode === "hybrid" && tryExec("engram", ["--version"])) {
+    if (resolveMode(cfg) === "hybrid" && tryExec("engram", ["--version"])) {
       const srcEngram = path.join(kRepo, "engram", project);
       if (exists(srcEngram)) {
         copyDir(srcEngram, engramLocal);
@@ -1920,7 +2196,7 @@ export async function sync(cwd, opts) {
 
   // Local → repo de conocimiento
   // 1) Engram export (si hybrid + disponible)
-  if (cfg.memoryMode === "hybrid" && tryExec("engram", ["--version"])) {
+  if (resolveMode(cfg) === "hybrid" && tryExec("engram", ["--version"])) {
     info("Exportando memorias con engram sync…");
     if (spawnCmd("engram", ["sync"], { cwd }) === 0) {
       if (exists(engramLocal)) { copyDir(engramLocal, path.join(kRepo, "engram", project)); ok("Export de Engram copiado al repo de conocimiento."); }
@@ -1928,7 +2204,7 @@ export async function sync(cwd, opts) {
     } else {
       warn("engram sync falló; sincronizo solo docs. Revisa el output de arriba.");
     }
-  } else if (cfg.memoryMode === "hybrid") {
+  } else if (resolveMode(cfg) === "hybrid") {
     warn("Modo hybrid pero Engram no responde; sincronizo solo docs.");
   }
   // 2) Docs

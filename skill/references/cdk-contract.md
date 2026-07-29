@@ -79,6 +79,11 @@ Un `cdk` conforme a la v1 debe:
 - Espejar a Engram los artefactos clave del hito y escribir la telemetría de tokens
   (`.ozali/metrics/token-metrics.json`, que lee `ozali doctor`).
 - Respetar la calibración de Strict TDD (Fase 3.5) y el 🛑 GATE del plan.
+  El `cdk` generado debe, al iniciar un hito, consultar `.ozali/config.json` → `testing` como
+  **primera fuente** de calibración. Si tiene `strict_tdd`, `runner` y `greenCommand` definidos,
+  los usa directamente. Si están vacíos (repo sin calibrar), recurre a:
+  1. `.ai/context/tech-stack.md` (sección "Testing & TDD");
+  2. Engram: `cdk/_project/testing-capabilities`.
 
 ### v2 — skill-generator + seguridad
 Un `cdk` conforme a la v2 debe cumplir TODO lo de la v1, más:
@@ -198,6 +203,9 @@ Un `cdk` conforme a la v5 debe cumplir TODO lo de la v4, más:
   - `agents.models.claude.low|medium|high` para Claude Code
   - `agents.models.opencode.low|medium|high` para opencode
   - El campo `model:` del subagente indica la clave (`low`, `medium`, `high`) a lookup.
+  - **Fallback:** si `.ozali/config.json` no tiene `agents`, usar defaults por agente:
+    Claude = `claude-haiku-4-5` / `claude-sonnet-4-5` / `claude-opus-4`;
+    opencode = `kimi-k3` / `deepseek-v4-pro` / `mimo-v2.5`.
 
 - **Reglas híbridas documentadas:**
   - `project-documenter`: si el documento a generar es técnico (`03-resumen-tecnico.md`,

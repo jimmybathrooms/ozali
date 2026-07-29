@@ -21,8 +21,9 @@ ${c.bold("Comandos:")}
             ozali init, guía la calibración y escribe la config para trabajar en conjunto.
             Con --doctor / --update opera sobre TODOS los repos miembros desde la raíz.
   doctor    Health-check read-only del proyecto (fuente de verdad, Engram, versión de cdk, TDD…).
-  update    Actualiza la instalación (skills ozali + ozali-commit + ozali-jarvis + permisos)
-            al paquete y avisa si la skill cdk quedó desactualizada.
+   update    Actualiza la instalación (skills ozali + ozali-commit + ozali-jarvis + permisos)
+             al paquete y avisa si la skill cdk quedó desactualizada.
+             Con --rollback restaura skills desde backup. Con --skills fuerza update en modo frozen.
   sync      Sincroniza el histórico (docs + Engram) con el repo de conocimiento.
   audit     Navega/audita la memoria de Engram del proyecto (o general).
   cloud     Gestiona Engram Cloud: status, upgrade, repair, dashboard, config.
@@ -42,6 +43,8 @@ ${c.bold("Opciones comunes:")}
    --no-engram          (init) No usar Engram; arranca en modo docs.
    --no-trust           (init) No marcar el workspace como confiable en Claude Code.
    --no-jarvis          (init/update) No crear/refrescar el orquestador ozali-jarvis.
+   --rollback           (update) Restaura skills desde su backup más reciente.
+   --skills             (update) Fuerza actualización de skills aunque esté frozen.
    --fix                (doctor) Auto-remedia problemas detectados (repo de conocimiento, TDD…).
   --import             (sync) Importa del repo de conocimiento a local.
   --push               (sync) Hace push al remoto del repo de conocimiento.
@@ -89,6 +92,8 @@ function parseArgs(argv) {
     else if (a === "--update") opts.wsUpdate = true;
     else if (a === "--knowledge-repo") opts.knowledgeRepo = argv[++i];
     else if (a === "--knowledge-only") opts.knowledgeOnly = true;
+    else if (a === "--rollback") opts.rollback = true;
+    else if (a === "--skills") opts.skills = true;
     else if (a === "--fix") opts.fix = true;
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "-v" || a === "--version") opts.version = true;
