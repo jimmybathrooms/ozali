@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, dashboard } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, dashboard } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -14,6 +14,10 @@ ${c.bold("Uso:")}
 ${c.bold("Comandos:")}
   init      Detecta el agente (Claude Code/opencode), instala las skills ozali y
             ozali-commit, aísla el histórico, configura Engram y el repo de conocimiento.
+  install-skills
+            Instala las skills ozali, ozali-commit y skill-generator en el scope
+            indicado (global por defecto). Úsalo cuando el repo ya está calibrado y
+            solo faltan las skills a nivel de agente.
   install-engram
             Instala (o reinstala) Engram bajo demanda, registra su MCP en el agente
             y activa modo hybrid. Úsalo cuando saltaste la instalación en init.
@@ -121,6 +125,7 @@ async function main() {
     case "audit": return await audit(cwd, opts);
     case "cloud": return await cloud(cwd, opts);
     case "dashboard": return await dashboard(cwd, opts);
+    case "install-skills": return await installSkills(cwd, opts);
     case "install-engram": return await installEngramCmd(cwd, opts);
     default:
       err(`comando desconocido "${cmd}". Usa ${c.bold("ozali --help")}.`);

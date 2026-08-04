@@ -49,6 +49,14 @@ Engram). Puedes aceptar los valores por defecto si dudas. Al terminar, deja list
 - los permisos base para que el agente **no te pregunte por cada comando** (ver más abajo),
 - el aislamiento del histórico (no ensucia tu repo).
 
+> **¿El repo ya está calibrado y solo te faltan las skills?**
+> Si tu proyecto ya tiene `.ozali/config.json` y la skill `cdk` generada, pero no tienes las
+> skills globales instaladas, corre:
+> ```bash
+> ozali install-skills
+> ```
+> Esto instala `ozali`, `ozali-commit` y `skill-generator` en tu agente sin tocar la calibración.
+
 ### 3. Abre tu agente y diagnostica
 
 Abre Claude Code (u opencode) en el proyecto y escribe:
@@ -81,10 +89,11 @@ Lleva el histórico y la memoria al repo de conocimiento del equipo. Tus compañ
 | Comando | Qué hace |
 |---|---|
 | `ozali init` | Prepara el proyecto (lo corres una vez por repo). |
+| `ozali install-skills` | Instala las skills globales (ozali, ozali-commit, skill-generator) cuando el repo ya está calibrado. |
 | `ozali install-engram` | Instala (o reinstala) Engram y registra su MCP cuando saltaste la instalación en `init`. |
 | `ozali workspace` | Configura varios repos de una carpeta para trabajar en conjunto (lo corres en la carpeta raíz). |
 | `ozali doctor` | Revisa que todo esté bien. Es solo lectura, no cambia nada. |
-| `ozali update` | Actualiza skill ozali + ozali-jarvis + permisos (y guía cómo regenerar cdk). |
+| `ozali update` | Actualiza skill ozali + ozali-jarvis + permisos; detecta Engram faltante y skills globales ausentes. |
 | `ozali sync` | Sube el histórico/memoria al repo de equipo. |
 | `ozali audit` | Navega/audita la memoria de Engram (qué se ha hecho). |
 

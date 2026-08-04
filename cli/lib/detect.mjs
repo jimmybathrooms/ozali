@@ -51,6 +51,18 @@ export function detectInstalledSkillGenerator(cwd) {
   return { installed: found.length > 0, paths: found };
 }
 
+/** ¿Está instalada la skill ozali-commit? Devuelve rutas encontradas. */
+export function detectInstalledOzaliCommit(cwd) {
+  const candidates = [
+    path.join(cwd, ".claude", "skills", "ozali-commit"),
+    path.join(HOME, ".claude", "skills", "ozali-commit"),
+    path.join(cwd, ".opencode", "skills", "ozali-commit"),
+    path.join(HOME, ".config", "opencode", "skills", "ozali-commit"),
+  ];
+  const found = candidates.filter((p) => exists(path.join(p, "SKILL.md")));
+  return { installed: found.length > 0, paths: found };
+}
+
 /** Engram disponible (binario CLI en PATH). El MCP no se puede sondear desde aquí. */
 export function detectEngram() {
   const bin = which("engram");
@@ -209,16 +221,37 @@ function countTestFiles(dir, depth = 0, acc = { n: 0 }) {
   return acc.n;
 }
 
+/** Detecta si el proyecto usa Node.js (package.json o archivos .js/.ts/.mjs). */
+export function detectNeedsNode(cwd) {
+  if (exists(path.join(cwd, "package.json"))) return true;
+  const nodeExts = /\.(js|mjs|cjs|ts|tsx|mts|cts)$/i;
+  let entries;
+  try { entries = fs.readdirSync(cwd, { withFileTypes: true }); } catch { return false; }
+  for (const e of entries) {
+    if (!e.isDirectory()) {
+      if (nodeExts.test(e.name)) return true;
+    } else if (!e.name.startsWith(".") && e.name !== "node_modules") {
+      let sub;
+      try { sub = fs.readdirSync(path.join(cwd, e.name), { withFileTypes: true }); } catch { continue; }
+      for (const s of sub) {
+        if (!s.isDirectory() && nodeExts.test(s.name)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Snapshot completo del entorno. */
 export function detectAll(cwd) {
   return {
     cwd,
-    node: { major: nodeMajor(), version: process.versions.node, ok: nodeMajor() >= 16 },
+    node: { major: nodeMajor(), version: process.versions.node, ok: nodeMajor() >= 16, needsNode: detectNeedsNode(cwd) },
     git: gitInfo(cwd),
     sot: detectSourceOfTruth(cwd),
     agents: detectAgents(cwd),
     skill: detectInstalledSkill(cwd),
     skillGenerator: detectInstalledSkillGenerator(cwd),
+    ozaliCommit: detectInstalledOzaliCommit(cwd),
     engram: detectEngram(),
     engramPlugin: detectEngramPluginInstalled(),
     engramOpencode: detectEngramOpencode(cwd),

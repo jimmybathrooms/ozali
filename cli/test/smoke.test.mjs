@@ -211,6 +211,20 @@ test("doctor marca cdk desactualizada si referencia copsis-commit", () => {
   }
 });
 
+test("doctor NO marca copsis-commit si solo es mención negativa (nunca copsis-commit)", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 5\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
+    const { stdout } = run(["doctor"], dir, true);
+    assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
+    assert.doesNotMatch(stdout, /contiene copsis-commit/, "doctor NO debe marcar copsis-commit en menciones negativas");
+    assert.match(stdout, /al día/, "doctor marca cdk al día");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("update avisa y da pasos manuales si cdk está desactualizada (legado)", () => {
   const dir = tmpProject();
   try {
@@ -570,6 +584,35 @@ test("update respeta frozen y crea backup; rollback restaura", () => {
     const { stdout: out3 } = run(["update", "--yes", "--rollback"], dir);
     assert.match(out3, /restaurada/, "rollback restaura skill");
     assert.match(fs.readFileSync(skillMd, "utf8"), /MODIFIED/, "skill restaurada con contenido previo tras rollback");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor en proyecto backend (sin Node) no marca Node como fallo", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    // Simular proyecto Java backend: pom.xml, sin package.json
+    fs.writeFileSync(path.join(dir, "pom.xml"), "<project><modelVersion>4.0.0</modelVersion></project>");
+    const { stdout } = run(["doctor"], dir, true);
+    assert.match(stdout, /Node ≥ 16.*no aplica/, "doctor muestra Node como no aplica en backend");
+    assert.doesNotMatch(stdout, /✖ Node ≥ 16/, "doctor NO marca Node como fallo en proyecto sin Node");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor en proyecto frontend (con Node) marca Node si es viejo", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    // Simular proyecto frontend: package.json
+    fs.writeFileSync(path.join(dir, "package.json"), '{"name":"test"}');
+    const { stdout } = run(["doctor"], dir, true);
+    // No podemos simular Node < 16, pero verificamos que NO diga "no aplica"
+    assert.doesNotMatch(stdout, /Node ≥ 16.*no aplica/, "doctor NO muestra 'no aplica' en proyecto con Node");
+    assert.match(stdout, /Node ≥ 16/, "doctor verifica Node en proyecto con package.json");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

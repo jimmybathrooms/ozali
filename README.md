@@ -14,6 +14,7 @@
 
 | Versión | Novedad |
 |---------|---------|
+| **v0.16.3** | **`install-skills` + `needsNode` + Opción B + fix copsis-commit**: Nuevo comando `install-skills` instala skills globales sin `init`. `ozali update` detecta Engram faltante y skills ausentes. `ozali doctor` solo valida Node ≥ 16 cuando el proyecto lo usa (detecta `package.json` o archivos `.js/.ts`); en backends Java/Go/Python muestra "no aplica" en vez de warning. `ozali init` defaultea a `global` cuando ya existe skill global (Opción B, evita duplicados). Fix de falso positivo de `copsis-commit` en `doctor`. |
 | **v0.16.0** | **Verificación real del plugin Engram MCP + fix de corrupción de `knowledgeRepo`**: `ozali doctor`/`init`/`update`/`install-engram` ahora leen `~/.claude/plugins/installed_plugins.json` y distinguen entre "plugin no instalado" y "instalado pero deshabilitado", con mensajes explícitos y pasos exactos para habilitarlo (`/plugin install engram@engram`). Fix en `toPortablePath` para expandir `~` antes de `path.resolve`, preferir `base-relative` sobre `home-relative`, y defenderse de paths corruptos con `~` interno. Handshake Engram en `ozali-jarvis` y skill `ozali` para detectar MCP inactivo al inicio de cada sesión. |
 | v0.15.0 | Clasificación cognitiva de agentes: cada subagente CDK tiene un `model:` (`low`/`medium`/`high`) que se resuelve a modelo real de Claude u opencode vía `.ozali/config.json`. Reglas híbridas para `project-documenter` (técnico vs sencillo) y `tester` (ejecución vs diagnóstico). Configuración local `.ozali/config.local.json`. `ozali doctor` detecta si el config fue editado después de generar los subagentes. |
 | v0.14.0 | Dashboard `ozali dashboard`, checkpoints obligatorios entre fases CDK, reanudación automática de hitos, micro-checkpoints intra-fase. Co-authored-by automático en `ozali-commit`. |
@@ -72,12 +73,13 @@ git clone <repo> && node ozali/cli/bin/ozali.mjs init
 ### Uso del CLI
 
 ```bash
-ozali init      # detecta agente, instala skills ozali + ozali-commit, aísla histórico, configura Engram
-ozali workspace # multi-repo: escanea la carpeta raíz, remedia init/calibración y cablea la config conjunta
-ozali doctor    # health-check read-only (fuente de verdad, Engram, Cloud, versión de cdk, Strict TDD…)
-ozali update    # actualiza skills ozali + ozali-commit + ozali-jarvis + permisos; avisa si cdk quedó atrás
-ozali sync      # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
-ozali audit     # navega/audita la memoria de Engram del proyecto (o general)
+ozali init           # detecta agente, instala skills ozali + ozali-commit, aísla histórico, configura Engram
+ozali install-skills # instala skills globales cuando el repo ya está calibrado y solo faltan las skills
+ozali workspace      # multi-repo: escanea la carpeta raíz, remedia init/calibración y cablea la config conjunta
+ozali doctor         # health-check read-only (fuente de verdad, Engram, Cloud, versión de cdk, Strict TDD…)
+ozali update         # actualiza skills + permisos; avisa si cdk quedó atrás; detecta Engram y skills globales
+ozali sync           # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
+ozali audit          # navega/audita la memoria de Engram del proyecto (o general)
 ```
 
 `ozali audit` recorre lo que el equipo ha acumulado en Engram: dentro de un repo propone auditar
@@ -128,12 +130,17 @@ ozali update                  # en cada repo: refresca skill ozali + ozali-jarvi
 ```
 
 `ozali update` también **crea ozali-jarvis** y **instala la skill `ozali-commit`** en repos
-inicializados con versiones anteriores. La skill `cdk` la **regenera/migra tu agente** (no el CLI):
-`ozali update` **detecta la versión de contrato** de `cdk` y, si quedó atrás (o aún referencia
-`copsis-commit` de versiones viejas), te avisa y te da los pasos manuales. Tras `ozali update`, abre
-el agente y vuelve a correr la skill `ozali`: su **pre-flight** detecta el `cdk` existente, lo **migra
-automáticamente** al contrato vigente (eliminando `copsis-commit` y cableando `ozali-commit`) y
-estampa la versión — tus docs por hito y el plan congelado se conservan.
+inicializados con versiones anteriores. Ahora también **detecta si Engram falta** y ofrece instalarlo,
+y **avisa si las skills globales no están presentes**. La skill `cdk` la **regenera/migra tu agente**
+(no el CLI): `ozali update` **detecta la versión de contrato** de `cdk` y, si quedó atrás (o aún
+referencia activa `copsis-commit` de versiones viejas), te avisa y te da los pasos manuales. Tras
+`ozali update`, abre el agente y vuelve a correr la skill `ozali`: su **pre-flight** detecta el `cdk`
+existente, lo **migra automáticamente** al contrato vigente (eliminando `copsis-commit` y cableando
+`ozali-commit`) y estampa la versión — tus docs por hito y el plan congelado se conservan.
+
+> **Repo ya calibrado, solo faltan las skills?** Si el proyecto ya tiene `cdk` generado y `.ozali/config.json`,
+> pero no tienes las skills en el agente, usa `ozali install-skills` para instalar `ozali`, `ozali-commit`
+> y `skill-generator` globalmente sin pasar por `init`.
 
 > **Commit del hito (`ozali-commit`):** `init`/`update` instalan la skill `ozali-commit`
 > (`.claude/skills/ozali-commit/`). `cdk` la invoca al cerrar cada hito

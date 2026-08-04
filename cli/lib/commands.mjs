@@ -256,7 +256,7 @@ export async function init(cwd, opts) {
 
   const env = detectAll(cwd);
 
-  if (!env.node.ok) warn(`Node ${env.node.version} detectado; ozali y el harness piden ≥16. Continúo, pero actualiza si ves errores.`);
+  if (env.node.needsNode && !env.node.ok) warn(`Node ${env.node.version} detectado; ozali y el harness piden ≥16. Continúo, pero actualiza si ves errores.`);
   if (!env.git.isRepo) warn("No estás en un repo git: la trazabilidad por commit y el sync quedarán limitados.");
 
   // Fuente de verdad
@@ -272,11 +272,18 @@ export async function init(cwd, opts) {
     { value: "both", label: "Ambos (Claude Code + opencode)" },
   ], { "claude-code": 0, opencode: 1, both: 2 }[agentDefault]);
 
-  // Scope (default global para evitar duplicados)
+  // Scope: si ya existe skill global, default global para evitar duplicados;
+  // si no, default project (primer uso, prueba local).
+  const hasGlobalSkill = exists(path.join(HOME, ".claude", "skills", "ozali", "SKILL.md"))
+    || exists(path.join(HOME, ".config", "opencode", "skills", "ozali", "SKILL.md"));
+  const scopeDefaultIndex = hasGlobalSkill ? 0 : 1;
   const scope = opts.scope || await select("¿Dónde instalo la skill?", [
     { value: "global", label: `Global (${c.dim("~/.claude/skills/ozali")})` },
     { value: "project", label: `Proyecto (${c.dim(".claude/skills/ozali")})` },
-  ], 0);
+  ], scopeDefaultIndex);
+  if (hasGlobalSkill && scope === "global") {
+    info("Detecté la skill ozali globalmente; uso global para evitar duplicados en el panel de skills.");
+  }
 
   // Repo de conocimiento (histórico aislado)
   const knowledgeRepoRaw = opts.knowledgeRepo || await ask("Ruta del repo de conocimiento (histórico aislado)", DEFAULT_KNOWLEDGE);
@@ -1338,10 +1345,11 @@ export async function doctor(cwd, opts = {}) {
   const add = (label, good, detail) => rows.push({ label, good, detail });
 
   add("Repo git", env.git.isRepo, env.git.isRepo ? (env.git.commit ? `${env.git.branch}@${env.git.commit}` : "repo sin commits") : "no es repo git");
-  add("Node ≥ 16", env.node.ok, env.node.version);
+  add("Node ≥ 16", env.node.needsNode ? env.node.ok : true, env.node.needsNode ? env.node.version : `${env.node.version} (no aplica a este proyecto)`);
   add("Fuente de verdad", env.sot.found, env.sot.found ? `${env.sot.doc} + ${env.sot.dir}/` : "ausente (corre la skill 'ozali')");
   add("Skill ozali instalada", env.skill.installed, env.skill.installed ? env.skill.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   add("Skill skill-generator", env.skillGenerator.installed, env.skillGenerator.installed ? env.skillGenerator.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
+  add("Skill ozali-commit", env.ozaliCommit.installed, env.ozaliCommit.installed ? env.ozaliCommit.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init / ozali install-skills)");
   // Skill cdk (la genera el agente): versión de contrato vs. la vigente del paquete.
   const cdkInfo = detectCdk(cwd);
   const cdkN = cdkCanonicalVersion();
@@ -1886,6 +1894,29 @@ export async function update(cwd, opts = {}) {
     if ((agent === "opencode" || agent === "both") && !env.engramOpencode.enabled) {
       warnEngramOpencodeStatus(env.engramOpencode);
     }
+  } else {
+    // Engram no está instalado: avisar y ofrecer instalar
+    warn("Engram no está instalado.");
+    const installNow = opts.yes ? true : await confirm("¿Instalo y configuro Engram ahora?", true);
+    if (installNow) {
+      const installed = installEngram();
+      if (installed) {
+        if (agent === "claude-code" || agent === "both") spawnCmd("engram", ["setup", "claude-code"]);
+        if (agent === "opencode" || agent === "both") spawnCmd("engram", ["setup", "opencode"]);
+        ok("Engram listo. Reinicia tu agente para que cargue el servidor MCP de Engram.");
+      } else {
+        warn("No se pudo instalar Engram automáticamente.");
+        printEngramManualInstructions(agent);
+      }
+    } else {
+      info("Modo docs activo. Cuando instales Engram, corre " + c.bold("ozali doctor") + " para activar hybrid.");
+    }
+  }
+
+  // 4.55) Verificar skills globales si el repo ya tiene config pero faltan skills
+  if (cfg && !env.skill.installed) {
+    warn("Skill ozali no instalada globalmente.");
+    info("Puedes instalar las skills con: " + c.bold("ozali install-skills") + " (o ozali init si el repo no está calibrado).");
   }
 
   // 4.6) Obsidian check
@@ -2000,7 +2031,17 @@ function detectCdk(cwd) {
       const m = txt.match(/cdk_contract_version:\s*(\d+)/i);
       if (m) version = parseInt(m[1], 10);
     }
-    if (/copsis-commit/i.test(txt)) hasCopsis = true;
+    // Detectar solo referencias activas/invocaciones, no menciones negativas
+    // (ej: "nunca copsis-commit", "no uses copsis-commit" son instructivas, no legado).
+    const lines = txt.split(/\r?\n/);
+    for (const line of lines) {
+      if (/copsis-commit/i.test(line)) {
+        const lower = line.toLowerCase();
+        if (/nunca|no\b/.test(lower)) continue; // referencia negativa/instructiva
+        hasCopsis = true;
+        break;
+      }
+    }
   }
   return { installed: true, paths, version, hasCopsis };
 }
@@ -2014,6 +2055,52 @@ function cdkCanonicalVersion() {
   } catch {
     return 1;
   }
+}
+
+// =========================================================== install-skills ===
+/**
+ * Instala las skills ozali, ozali-commit y skill-generator en el scope indicado
+ * (global por defecto). Útil cuando el repo ya está calibrado y solo faltan las
+ * skills a nivel de agente.
+ */
+export async function installSkills(cwd, opts = {}) {
+  step("ozali install-skills — instalar skills globales");
+  const env = detectAll(cwd);
+
+  const scope = opts.scope || "global";
+  const agent = opts.agent || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
+    : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
+
+  // Claude Code
+  if (agent === "claude-code" || agent === "both") {
+    const target = skillTarget(cwd, scope);
+    ensureDir(path.dirname(target));
+    copyDir(SKILL_SRC, target);
+    ok(`Skill ozali instalada: ${path.relative(cwd, target) || target}`);
+
+    const commitTarget = commitSkillTarget(cwd, scope);
+    copyDir(COMMIT_SKILL_SRC, commitTarget);
+    ok(`Skill ozali-commit instalada: ${path.relative(cwd, commitTarget) || commitTarget}`);
+
+    const generatorTarget = skillGeneratorTarget(cwd, scope);
+    copyDir(SKILL_GENERATOR_SRC, generatorTarget);
+    ok(`Skill skill-generator instalada: ${path.relative(cwd, generatorTarget) || generatorTarget}`);
+  }
+
+  // opencode
+  if (agent === "opencode" || agent === "both") {
+    const ocCommit = commitSkillTargetOpencode(cwd, scope);
+    ensureDir(path.dirname(ocCommit));
+    copyDir(COMMIT_SKILL_SRC, ocCommit);
+    ok(`Skill ozali-commit instalada en opencode: ${path.relative(cwd, ocCommit) || ocCommit}`);
+
+    const ocGen = skillGeneratorTargetOpencode(cwd, scope);
+    copyDir(SKILL_GENERATOR_SRC, ocGen);
+    ok(`Skill skill-generator instalada en opencode: ${path.relative(cwd, ocGen) || ocGen}`);
+  }
+
+  info("Reinicia tu agente para que reconozca las skills instaladas.");
+  return 0;
 }
 
 // =========================================================== install-engram ===
