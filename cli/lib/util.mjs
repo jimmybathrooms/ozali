@@ -316,6 +316,30 @@ export function pruneGitignore(cwd, entries) {
   return { removed };
 }
 
+// ---- modelos de agentes -----------------------------------------------------
+
+/**
+ * Migra los IDs de modelo de Claude a los **alias** (`haiku`/`sonnet`/`opus`), que es lo que
+ * exige el contrato cdk v6. Un ID con versión (`claude-opus-4`) envejece: queda apuntando a un
+ * modelo viejo —o inexistente— cuando sale la familia siguiente. Los alias no.
+ * Solo toca valores que sean claramente un ID de familia de Claude; un modelo custom se respeta.
+ * Función pura. Devuelve { models, changed } (no muta la entrada).
+ */
+export function migrateClaudeModelAliases(claudeModels) {
+  if (!claudeModels || typeof claudeModels !== "object") return { models: claudeModels, changed: [] };
+  const out = { ...claudeModels };
+  const changed = [];
+  for (const level of ["low", "medium", "high"]) {
+    const v = out[level];
+    if (typeof v !== "string") continue;
+    const m = /^claude-(haiku|sonnet|opus)(?:[-_.].*)?$/i.exec(v.trim());
+    if (!m) continue; // ID custom o ya alias → intacto
+    const alias = m[1].toLowerCase();
+    if (v !== alias) { out[level] = alias; changed.push(`${level}: ${v} → ${alias}`); }
+  }
+  return { models: out, changed };
+}
+
 // ---- node version -----------------------------------------------------------
 export function nodeMajor() {
   return parseInt(process.versions.node.split(".")[0], 10);

@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   engramAssetName, pickEngramAsset, isTrustedEngramURL, checksumsURLFor, parseChecksums,
-  slimReleases, readReleasesCache,
+  slimReleases, readReleasesCache, migrateClaudeModelAliases,
   toPortablePath, fromPortablePath,
 } from "../lib/util.mjs";
 
@@ -447,6 +447,52 @@ test("update migra un .gitignore legado (.ozali/* → solo ruido local)", () => 
     assert.match(gi, /^\.ozali\/\.session-state\.json$/m, "update agrega el ignore del state");
     assert.match(gi, /^node_modules\/$/m, "no toca reglas ajenas");
     assert.equal(gi.match(/# ozali — histórico aislado/g).length, 1, "no duplica el encabezado del bloque");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("migrateClaudeModelAliases pasa IDs con versión a alias y respeta modelos custom", () => {
+  const legacy = migrateClaudeModelAliases({ low: "claude-haiku-4-5", medium: "claude-sonnet-4-5", high: "claude-opus-4" });
+  assert.deepEqual(legacy.models, { low: "haiku", medium: "sonnet", high: "opus" });
+  assert.equal(legacy.changed.length, 3);
+
+  const mixed = migrateClaudeModelAliases({ low: "haiku", medium: "mi-modelo-propio", high: "claude-opus-5" });
+  assert.deepEqual(mixed.models, { low: "haiku", medium: "mi-modelo-propio", high: "opus" });
+  assert.deepEqual(mixed.changed, ["high: claude-opus-5 → opus"], "solo migra lo que es un ID de familia Claude");
+
+  assert.deepEqual(migrateClaudeModelAliases(null).changed, []);
+});
+
+test("init escribe los modelos de Claude como alias (contrato cdk v6)", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".ozali", "config.json"), "utf8"));
+    assert.deepEqual(cfg.agents.models.claude, { low: "haiku", medium: "sonnet", high: "opus" });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("update migra los modelos legados y sube la versión del config", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    const cfgPath = path.join(dir, ".ozali", "config.json");
+    // Simula un config calibrado con una versión vieja (IDs con versión).
+    const legacy = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    legacy.version = "0.14.0";
+    legacy.agents.models.claude = { low: "claude-haiku-4-5", medium: "claude-sonnet-4-5", high: "claude-opus-4" };
+    fs.writeFileSync(cfgPath, JSON.stringify(legacy, null, 2));
+
+    const { stdout } = run(["update", "--yes"], dir);
+
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    assert.deepEqual(cfg.agents.models.claude, { low: "haiku", medium: "sonnet", high: "opus" }, "migra a alias");
+    const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf8"));
+    assert.equal(cfg.version, pkg.version, "update sube la versión del config a la del CLI");
+    assert.match(stdout, /alias \(contrato cdk v6\)/, "avisa de la migración de modelos");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

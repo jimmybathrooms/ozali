@@ -1,8 +1,6 @@
 # Histórico aislado: nunca se commitea en el repo principal del proyecto.
 # (En el repo de la HERRAMIENTA ozali esto casi no aplica, pero se documenta el patrón
 #  que el CLI inyecta en el .gitignore de los repos destino.)
-.ozali/*
-!.ozali/cloud.json
 .engram/
 
 # Node
@@ -23,3 +21,16 @@ docs/info/
 *.log
 .idea/
 .vscode/
+
+# ozali — histórico aislado (no commitear en el repo principal)
+.ozali/backups/
+.ozali/.session-state.json
+
+# Artefactos de correr el propio CLI dentro de su repo (pruebas de init/update).
+# En un repo destino .ozali/ SÍ se commitea (config del equipo); aquí es salida de prueba.
+.ozali/
+.claude/
+.opencode/
+AGENTS.md
+CLAUDE.md
+opencode.json

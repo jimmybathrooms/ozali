@@ -6,7 +6,8 @@ import crypto from "node:crypto";
 import {
   c, ok, warn, err, info, step,
   SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
-  ensureGitignore, pruneGitignore, GITIGNORE_OBSOLETE, tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
+  ensureGitignore, pruneGitignore, GITIGNORE_OBSOLETE, migrateClaudeModelAliases,
+  tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
   isTrustedEngramURL, checksumsURLFor, parseChecksums, slimReleases, readReleasesCache,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
   toPortablePath, fromPortablePath, parseSemver, compareSemver,
@@ -132,6 +133,11 @@ function normalizeConfig(cfg, cwd) {
   if (cfg && cfg.knowledgeRepo) {
     cfg.knowledgeRepo = toPortablePath(cfg.knowledgeRepo, cwd);
   }
+  // Contrato cdk v6: los modelos de Claude se guardan como alias (haiku/sonnet/opus).
+  if (cfg && cfg.agents && cfg.agents.models && cfg.agents.models.claude) {
+    const { models } = migrateClaudeModelAliases(cfg.agents.models.claude);
+    cfg.agents.models.claude = models;
+  }
   return cfg;
 }
 
@@ -165,10 +171,12 @@ function defaultTestingConfig(env = {}) {
 function defaultAgentsConfig() {
   return {
     models: {
+      // Alias, no IDs con versión: el contrato cdk v6 los estampa tal cual en el
+      // frontmatter `model:` y no envejecen cuando sale la familia siguiente.
       claude: {
-        low: "claude-haiku-4-5",
-        medium: "claude-sonnet-4-5",
-        high: "claude-opus-4",
+        low: "haiku",
+        medium: "sonnet",
+        high: "opus",
       },
       opencode: {
         low: "kimi-k3",
@@ -2141,6 +2149,15 @@ export async function update(cwd, opts = {}) {
   // 5) versión del config
   if (cfg) {
     if (!cfg.agents) { cfg.agents = defaultAgentsConfig(); info("Agregando configuración de agentes por defecto a .ozali/config.json"); }
+    // Contrato cdk v6: IDs con versión → alias. Se avisa porque cambia lo que se estampa
+    // en el frontmatter `model:` de los subagentes al regenerar cdk.
+    if (cfg.agents.models && cfg.agents.models.claude) {
+      const { changed } = migrateClaudeModelAliases(cfg.agents.models.claude);
+      if (changed.length) {
+        ok(`Modelos de Claude migrados a alias (contrato cdk v6): ${changed.join(", ")}.`);
+        info("  Regenera cdk desde tu agente para que los subagentes estampen el alias en " + c.bold("model:") + ".");
+      }
+    }
     cfg.version = pkgVersion();
     cfg.updatedAt = new Date().toISOString();
     writeJSON(cfgPath, normalizeConfig(cfg, cwd));
