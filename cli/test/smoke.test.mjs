@@ -415,13 +415,38 @@ test("cloud con subcomando desconocido sale con código 1", () => {
   }
 });
 
-test(".gitignore del repo destino permite .ozali/cloud.json (commiteable)", () => {
+test(".gitignore ignora solo el ruido local; .ozali/ es commiteable", () => {
   const dir = tmpProject();
   try {
     run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
     const gi = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
-    assert.match(gi, /\.ozali\/\*/, "debe ignorar .ozali/*");
-    assert.match(gi, /!\.ozali\/cloud\.json/, "debe permitir .ozali/cloud.json");
+    assert.doesNotMatch(gi, /^\.ozali\/\*$/m, "ya NO ignora .ozali/ entero");
+    assert.doesNotMatch(gi, /!\.ozali\/cloud\.json/, "la negación quedó obsoleta y no debe escribirse");
+    assert.match(gi, /^\.ozali\/backups\/$/m, "ignora los backups de skills");
+    assert.match(gi, /^\.ozali\/\.session-state\.json$/m, "ignora el state de sesión");
+    assert.match(gi, /^\.engram\/$/m, "ignora .engram/");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("update migra un .gitignore legado (.ozali/* → solo ruido local)", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    // Simula el .gitignore que escribían las versiones < 0.17.0.
+    fs.writeFileSync(path.join(dir, ".gitignore"),
+      "node_modules/\n\n# ozali — histórico aislado (no commitear en el repo principal)\n.ozali/*\n!.ozali/cloud.json\n.engram/\n");
+
+    run(["update"], dir);
+
+    const gi = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
+    assert.doesNotMatch(gi, /^\.ozali\/\*$/m, "update retira .ozali/*");
+    assert.doesNotMatch(gi, /!\.ozali\/cloud\.json/, "update retira la negación obsoleta");
+    assert.match(gi, /^\.ozali\/backups\/$/m, "update agrega el ignore de backups");
+    assert.match(gi, /^\.ozali\/\.session-state\.json$/m, "update agrega el ignore del state");
+    assert.match(gi, /^node_modules\/$/m, "no toca reglas ajenas");
+    assert.equal(gi.match(/# ozali — histórico aislado/g).length, 1, "no duplica el encabezado del bloque");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

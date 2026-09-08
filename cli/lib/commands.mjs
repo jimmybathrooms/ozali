@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import {
   c, ok, warn, err, info, step,
   SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
-  ensureGitignore, tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
+  ensureGitignore, pruneGitignore, GITIGNORE_OBSOLETE, tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
   isTrustedEngramURL, checksumsURLFor, parseChecksums, slimReleases, readReleasesCache,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
   toPortablePath, fromPortablePath, parseSemver, compareSemver,
@@ -17,6 +17,10 @@ import { ask, confirm, select } from "./prompt.mjs";
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
 const CONFIG_LOCAL_PATH = (cwd) => path.join(cwd, ".ozali", "config.local.json");
 const TEAM_CLOUD_PATH = (cwd) => path.join(cwd, ".ozali", "cloud.json");
+
+// Lo único de ozali que NO va al repo: backups de skills (pesados) y el state de sesión
+// (cambia en cada corrida). El resto de .ozali/ —config.json, docs— es del equipo.
+const GITIGNORE_ENTRIES = [".ozali/backups/", ".ozali/.session-state.json", ".engram/"];
 
 /** Lee config.json y mergea config.local.json encima (local gana, igual que .claude/settings.local.json). */
 function readMergedConfig(cwd) {
@@ -437,11 +441,13 @@ export async function init(cwd, opts) {
     if (agent === "opencode" || agent === "both") ensureJarvisOpencode(cwd);
   }
 
-  // 3) gitignore del histórico aislado
+  // 3) gitignore: .ozali/ se commitea (config del equipo); fuera solo el ruido local.
   if (env.git.isRepo) {
-    const { added } = ensureGitignore(cwd, [".ozali/*", "!.ozali/cloud.json", ".engram/"]);
-    if (added.length) ok(`.gitignore actualizado: ${added.join(", ")} (histórico aislado del repo principal).`);
-    else info(".gitignore ya aislaba el histórico.");
+    const { removed } = pruneGitignore(cwd, GITIGNORE_OBSOLETE);
+    const { added } = ensureGitignore(cwd, GITIGNORE_ENTRIES);
+    if (removed.length) ok(`.gitignore: reglas obsoletas retiradas (${removed.join(", ")}) — .ozali/ ahora se commitea.`);
+    if (added.length) ok(`.gitignore actualizado: ${added.join(", ")} (ruido local fuera del repo).`);
+    else if (!removed.length) info(".gitignore ya estaba al día.");
   }
 
   // 4-5) repo de conocimiento + config local (reutiliza helper)
@@ -2034,6 +2040,18 @@ export async function update(cwd, opts = {}) {
     if (!exists(engPath)) { writeJSON(engPath, { project_name: proj }); ok(`Proyecto de memoria fijado en ${c.bold(".engram/config.json")} (${proj}).`); }
     if (agent === "claude-code" || agent === "both") ensureJarvisClaudeCode(cwd);
     if (agent === "opencode" || agent === "both") ensureJarvisOpencode(cwd);
+  }
+
+  // 3.5) gitignore: migra repos previos a 0.17.0, que ignoraban .ozali/ entero.
+  if (gitInfo(cwd).isRepo) {
+    const { removed } = pruneGitignore(cwd, GITIGNORE_OBSOLETE);
+    const { added } = ensureGitignore(cwd, GITIGNORE_ENTRIES);
+    if (removed.length) {
+      ok(`.gitignore migrado: retiradas ${removed.join(", ")}.`);
+      info("  " + c.bold(".ozali/") + " (config del equipo y docs por hito) ahora se commitea; fuera quedan backups y state de sesión.");
+      info("  Si ya tenías archivos de " + c.bold(".ozali/") + " sin trackear, aparecerán en tu próximo " + c.bold("git status") + ".");
+    }
+    if (added.length) ok(`.gitignore actualizado: ${added.join(", ")}.`);
   }
 
   // 4) Skill cdk: la genera/migra el AGENTE (Fase 0.5/6); el CLI solo detecta versión y guía.

@@ -272,17 +272,48 @@ export function projectName(cwd) {
 }
 
 // ---- .gitignore idempotente -------------------------------------------------
+export const GITIGNORE_HEADER = "# ozali — histórico aislado (no commitear en el repo principal)";
+
+/** Reglas que ozali escribía antes y que hoy sobran: `.ozali/` se commitea (config del equipo). */
+export const GITIGNORE_OBSOLETE = [".ozali/*", "!.ozali/cloud.json"];
+
 export function ensureGitignore(cwd, entries) {
   const gi = path.join(cwd, ".gitignore");
-  let body = exists(gi) ? fs.readFileSync(gi, "utf8") : "";
-  const lines = new Set(body.split(/\r?\n/));
-  const missing = entries.filter((e) => !lines.has(e));
+  const body = exists(gi) ? fs.readFileSync(gi, "utf8") : "";
+  const lines = body.split(/\r?\n/);
+  const have = new Set(lines);
+  const missing = entries.filter((e) => !have.has(e));
   if (missing.length === 0) return { added: [] };
+
+  // Si el bloque de ozali ya existe, mete lo que falte DENTRO en vez de duplicar el encabezado.
+  const at = lines.indexOf(GITIGNORE_HEADER);
+  if (at !== -1) {
+    lines.splice(at + 1, 0, ...missing);
+    fs.writeFileSync(gi, lines.join("\n"));
+    return { added: missing };
+  }
+
   const block = (body && !body.endsWith("\n") ? "\n" : "") +
-    "\n# ozali — histórico aislado (no commitear en el repo principal)\n" +
-    missing.join("\n") + "\n";
+    "\n" + GITIGNORE_HEADER + "\n" + missing.join("\n") + "\n";
   fs.writeFileSync(gi, body + block);
   return { added: missing };
+}
+
+/**
+ * Quita líneas exactas del .gitignore (reglas de ozali que quedaron obsoletas).
+ * `ensureGitignore` solo agrega, así que sin esto un repo viejo conserva sus reglas
+ * para siempre. Devuelve { removed }.
+ */
+export function pruneGitignore(cwd, entries) {
+  const gi = path.join(cwd, ".gitignore");
+  if (!exists(gi)) return { removed: [] };
+  const body = fs.readFileSync(gi, "utf8");
+  const lines = body.split(/\r?\n/);
+  const drop = new Set(entries);
+  const removed = entries.filter((e) => lines.some((l) => l.trim() === e));
+  if (removed.length === 0) return { removed: [] };
+  fs.writeFileSync(gi, lines.filter((l) => !drop.has(l.trim())).join("\n"));
+  return { removed };
 }
 
 // ---- node version -----------------------------------------------------------
