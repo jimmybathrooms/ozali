@@ -6,7 +6,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { engramAssetName, pickEngramAsset, toPortablePath, fromPortablePath } from "../lib/util.mjs";
+import {
+  engramAssetName, pickEngramAsset, isTrustedEngramURL, checksumsURLFor, parseChecksums,
+  slimReleases, readReleasesCache,
+  toPortablePath, fromPortablePath,
+} from "../lib/util.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.resolve(HERE, "..", "bin", "ozali.mjs");
@@ -190,10 +194,10 @@ test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 5\n---\n# cdk\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 6\n---\n# cdk\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
-    assert.match(stdout, /contrato v5 \(al día\)/, "doctor marca cdk al día");
+    assert.match(stdout, /contrato v6 \(al día\)/, "doctor marca cdk al día");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -215,7 +219,7 @@ test("doctor NO marca copsis-commit si solo es mención negativa (nunca copsis-c
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 5\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 6\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
     assert.doesNotMatch(stdout, /contiene copsis-commit/, "doctor NO debe marcar copsis-commit en menciones negativas");
@@ -525,31 +529,106 @@ test("sync resuelve knowledgeRepo portable correctamente", () => {
 });
 
 test("pickEngramAsset ignora tags no-semver sin binarios (pi-v*) y draft/prerelease", () => {
+  const B = "https://github.com/Gentleman-Programming/engram/releases/download";
   // Shape real de la API de GitHub: el 'latest' es pi-v0.1.9 (0 assets); los binarios
   // viven en tags vX.Y.Z. Además metemos un prerelease más nuevo que debe saltarse.
   const releases = [
     { tag_name: "pi-v0.1.9", prerelease: false, draft: false, assets: [] },
     { tag_name: "v2.0.0", prerelease: true, draft: false, assets: [
-      { name: "engram_2.0.0_linux_amd64.tar.gz", browser_download_url: "https://x/pre" },
+      { name: "engram_2.0.0_linux_amd64.tar.gz", browser_download_url: B + "/v2.0.0/engram_2.0.0_linux_amd64.tar.gz" },
     ] },
     { tag_name: "v1.17.0", prerelease: false, draft: false, assets: [
-      { name: "checksums.txt", browser_download_url: "https://x/sum" },
-      { name: "engram_1.17.0_linux_amd64.tar.gz", browser_download_url: "https://x/engram_1.17.0_linux_amd64.tar.gz" },
-      { name: "engram_1.17.0_darwin_arm64.tar.gz", browser_download_url: "https://x/darwin" },
+      { name: "checksums.txt", browser_download_url: B + "/v1.17.0/checksums.txt" },
+      { name: "engram_1.17.0_linux_amd64.tar.gz", browser_download_url: B + "/v1.17.0/engram_1.17.0_linux_amd64.tar.gz" },
+      { name: "engram_1.17.0_darwin_arm64.tar.gz", browser_download_url: B + "/v1.17.0/engram_1.17.0_darwin_arm64.tar.gz" },
     ] },
   ];
   // Linux x64 → salta pi-v* (sin assets) y el prerelease → v1.17.0, con la URL REAL del asset.
   assert.deepEqual(pickEngramAsset(releases, "linux", "x64"), {
     version: "1.17.0",
-    url: "https://x/engram_1.17.0_linux_amd64.tar.gz",
+    url: B + "/v1.17.0/engram_1.17.0_linux_amd64.tar.gz",
+    asset: "engram_1.17.0_linux_amd64.tar.gz",
   });
   // macOS arm64 → mismo release, su asset darwin_arm64.
-  assert.deepEqual(pickEngramAsset(releases, "darwin", "arm64"), { version: "1.17.0", url: "https://x/darwin" });
+  assert.deepEqual(pickEngramAsset(releases, "darwin", "arm64"), {
+    version: "1.17.0",
+    url: B + "/v1.17.0/engram_1.17.0_darwin_arm64.tar.gz",
+    asset: "engram_1.17.0_darwin_arm64.tar.gz",
+  });
   // Arch sin binario → null.
   assert.equal(pickEngramAsset(releases, "linux", "ia32"), null);
   // Sin releases utilizables → null.
   assert.equal(pickEngramAsset([{ tag_name: "pi-v0.1.9", assets: [] }], "linux", "x64"), null);
   assert.equal(pickEngramAsset(null, "linux", "x64"), null);
+});
+
+test("pickEngramAsset descarta assets cuya URL no es del repo oficial", () => {
+  const releases = [
+    { tag_name: "v1.17.0", assets: [
+      { name: "engram_1.17.0_linux_amd64.tar.gz", browser_download_url: "https://cdn-suplantado.tld/engram_1.17.0_linux_amd64.tar.gz" },
+    ] },
+    { tag_name: "v1.16.0", assets: [
+      { name: "engram_1.16.0_linux_amd64.tar.gz", browser_download_url: "https://github.com/Gentleman-Programming/engram/releases/download/v1.16.0/engram_1.16.0_linux_amd64.tar.gz" },
+    ] },
+  ];
+  const picked = pickEngramAsset(releases, "linux", "x64");
+  assert.equal(picked.version, "1.16.0", "salta el release con URL de origen no confiable");
+});
+
+test("isTrustedEngramURL solo acepta assets de release del repo oficial por HTTPS", () => {
+  const good = "https://github.com/Gentleman-Programming/engram/releases/download/v1.17.0/engram_1.17.0_linux_amd64.tar.gz";
+  assert.equal(isTrustedEngramURL(good), true);
+  assert.equal(isTrustedEngramURL(good.replace("https:", "http:")), false, "HTTP → rechazado");
+  assert.equal(isTrustedEngramURL("https://github.com.suplantado.tld/Gentleman-Programming/engram/releases/download/v1/x.tar.gz"), false, "host parecido → rechazado");
+  assert.equal(isTrustedEngramURL("https://github.com@suplantado.tld/Gentleman-Programming/engram/releases/download/v1/x.tar.gz"), false, "userinfo → rechazado");
+  assert.equal(isTrustedEngramURL("https://github.com/otro/repo/releases/download/v1/x.tar.gz"), false, "otro repo → rechazado");
+  assert.equal(isTrustedEngramURL("https://github.com/Gentleman-Programming/engram/archive/main.tar.gz"), false, "no es asset de release → rechazado");
+  assert.equal(isTrustedEngramURL(null), false);
+});
+
+test("checksumsURLFor apunta al manifiesto del mismo release", () => {
+  const asset = "https://github.com/Gentleman-Programming/engram/releases/download/v1.17.0/engram_1.17.0_linux_amd64.tar.gz";
+  assert.equal(checksumsURLFor(asset), "https://github.com/Gentleman-Programming/engram/releases/download/v1.17.0/checksums.txt");
+  assert.equal(checksumsURLFor("https://suplantado.tld/x.tar.gz"), null, "URL no confiable → null");
+});
+
+test("parseChecksums extrae el sha256 del asset exacto", () => {
+  const hashA = "a".repeat(64);
+  const hashB = "b".repeat(64);
+  const txt = hashA + "  engram_1.17.0_linux_amd64.tar.gz\n" + hashB + "  engram_1.17.0_darwin_arm64.tar.gz\n";
+  assert.equal(parseChecksums(txt, "engram_1.17.0_darwin_arm64.tar.gz"), hashB);
+  assert.equal(parseChecksums(txt, "engram_1.17.0_windows_amd64.zip"), null, "asset ausente → null");
+  assert.equal(parseChecksums("basura sin formato", "engram_1.17.0_linux_amd64.tar.gz"), null);
+  assert.equal(parseChecksums("", "x"), null);
+});
+
+test("slimReleases se queda solo con los campos que usamos", () => {
+  const slim = slimReleases([{
+    tag_name: "v1.20.0", draft: false, prerelease: false, published_at: "2026-01-01T00:00:00Z",
+    html_url: "https://github.com/x", body: "changelog gigante".repeat(500),
+    assets: [{ name: "engram_1.20.0_linux_amd64.tar.gz", browser_download_url: "https://github.com/a", size: 123, uploader: { login: "bot" } }],
+  }]);
+  assert.deepEqual(Object.keys(slim[0]).sort(), ["assets", "draft", "html_url", "prerelease", "published_at", "tag_name"]);
+  assert.deepEqual(Object.keys(slim[0].assets[0]).sort(), ["browser_download_url", "name"]);
+  assert.equal(slimReleases(null).length, 0);
+});
+
+test("readReleasesCache distingue caché fresco, vencido e inservible", () => {
+  const now = 1_000_000_000_000;
+  const ttl = 6 * 60 * 60 * 1000;
+  const releases = [{ tag_name: "v1.20.0" }];
+
+  const fresh = readReleasesCache({ fetchedAt: now - 60_000, releases }, now, ttl);
+  assert.equal(fresh.fresh, true, "dentro del TTL → fresco");
+
+  const stale = readReleasesCache({ fetchedAt: now - ttl - 1, releases }, now, ttl);
+  assert.equal(stale.fresh, false, "fuera del TTL → sirve como red de seguridad");
+  assert.ok(stale.ageMs > ttl);
+
+  assert.equal(readReleasesCache(null, now, ttl), null);
+  assert.equal(readReleasesCache({ releases }, now, ttl), null, "sin fetchedAt → inservible");
+  assert.equal(readReleasesCache({ fetchedAt: now + 60_000, releases }, now, ttl), null, "timestamp futuro → inservible");
+  assert.equal(readReleasesCache({ fetchedAt: now, releases: [] }, now, ttl), null, "lista vacía → inservible");
 });
 
 test("update respeta frozen y crea backup; rollback restaura", () => {

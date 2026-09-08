@@ -2,10 +2,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import {
   c, ok, warn, err, info, step,
   SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
+  isTrustedEngramURL, checksumsURLFor, parseChecksums, slimReleases, readReleasesCache,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
   toPortablePath, fromPortablePath, parseSemver, compareSemver,
 } from "./util.mjs";
@@ -480,10 +482,11 @@ function checkEngramVersion() {
   const currentRaw = tryExec("engram", ["version"]);
   if (!currentRaw) return null;
   const current = currentRaw.trim().replace(/^engram\s+/, "");
-  const raw = fetchText(ENGRAM_RELEASES_LIST);
-  if (!raw) return null;
-  let releases;
-  try { releases = JSON.parse(raw); } catch { return null; }
+  // Usa el mismo caché de 6h que la instalación: `doctor` corre a menudo y no debe
+  // gastar el cupo de la API en cada invocación.
+  const res = fetchEngramReleases({ quiet: true });
+  if (!res) return null;
+  const releases = res.releases;
   if (!Array.isArray(releases)) return null;
   const now = Date.now();
   const COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -571,34 +574,190 @@ function installEngram() {
 
 // Lista de releases (NO /releases/latest: ese endpoint puede devolver un tag especial
 // sin binarios, p. ej. `pi-v*`). Recorremos la lista y elegimos el release estable.
-const ENGRAM_RELEASES_LIST = "https://api.github.com/repos/Gentleman-Programming/engram/releases?per_page=30";
+const ENGRAM_RELEASES_PATH = "repos/Gentleman-Programming/engram/releases?per_page=30";
+const RELEASES_CACHE_FILE = path.join(HOME, ".ozali", "cache", "engram-releases.json");
+const RELEASES_TTL_MS = 6 * 60 * 60 * 1000; // 6h: suficiente para no repegarle a la API en cada repo
 
-/** GET de texto con curl (o wget). Devuelve el body o null si no hay red/herramienta. */
+/**
+ * GET de texto con curl (o wget). Fuerza HTTPS también en los redirects: sin esto un
+ * redirect a `http://` degradaría la conexión y abriría la puerta a un MITM.
+ * Devuelve el body o null si no hay red/herramienta.
+ */
 function fetchText(url) {
-  if (which("curl")) return tryExec("curl", ["-fsSL", url]);
-  if (which("wget")) return tryExec("wget", ["-qO-", url]);
+  if (which("curl")) return tryExec("curl", ["-fsSL", "--proto", "=https", "--proto-redir", "=https", "--max-time", "60", url]);
+  if (which("wget")) return tryExec("wget", ["-qO-", "--https-only", "--max-redirect=5", "--timeout=60", url]);
+  return null;
+}
+
+/** Token de GitHub del entorno, si el dev ya tiene uno exportado. "" si no hay. */
+function githubToken() {
+  return String(process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+}
+
+/**
+ * GET a la API de GitHub devolviendo { body, status }. Estrategia, de mejor a peor:
+ *   1. `gh api` — si el dev ya tiene el CLI autenticado, 5000 req/h y cero manejo de secretos.
+ *   2. curl con `Authorization: Bearer` desde GITHUB_TOKEN/GH_TOKEN. El header va en un
+ *      archivo de config 0600 (`curl -K`), NUNCA en argv: los argumentos son visibles
+ *      para cualquier proceso de la máquina (`ps aux`).
+ *   3. curl/wget anónimo — 60 req/h por IP; es el que se topa con el 403.
+ * status es el código HTTP cuando se pudo leer, 0 si no hubo forma de saberlo.
+ */
+function fetchGitHubAPI(apiPath) {
+  if (which("gh")) {
+    const out = tryExec("gh", ["api", apiPath]);
+    if (out) return { body: out, status: 200 };
+  }
+
+  const url = `https://api.github.com/${apiPath}`;
+  const token = githubToken();
+
+  if (token && which("curl")) {
+    let dir = null;
+    try {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-gh-"));
+      const cfg = path.join(dir, "curlrc");
+      fs.writeFileSync(cfg, `header = "Authorization: Bearer ${token}"\n`, { mode: 0o600 });
+      const body = tryExec("curl", ["-fsSL", "--proto", "=https", "--proto-redir", "=https", "--max-time", "60", "-K", cfg, url]);
+      if (body) return { body, status: 200 };
+    } catch { /* cae al modo anónimo */ }
+    finally { if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } } }
+  }
+
+  // Anónimo: separamos cuerpo y código HTTP para poder distinguir "sin red" de "rate limit".
+  if (which("curl")) {
+    let dir = null;
+    try {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-gh-"));
+      const bodyFile = path.join(dir, "body");
+      const code = tryExec("curl", ["-sS", "--proto", "=https", "--proto-redir", "=https", "--max-time", "60", "-o", bodyFile, "-w", "%{http_code}", url]);
+      const status = parseInt(code, 10) || 0;
+      const body = status === 200 ? fs.readFileSync(bodyFile, "utf8") : null;
+      return { body, status };
+    } catch { return { body: null, status: 0 }; }
+    finally { if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } } }
+  }
+
+  const body = fetchText(url);
+  return { body, status: body ? 200 : 0 };
+}
+
+/** Lee el caché de releases del disco (o null). */
+function loadReleasesCache() {
+  return readReleasesCache(readJSON(RELEASES_CACHE_FILE, null), Date.now(), RELEASES_TTL_MS);
+}
+
+/** Guarda la lista de releases (proyectada) en el caché. Best-effort: nunca rompe el flujo. */
+function saveReleasesCache(releases) {
+  try {
+    ensureDir(path.dirname(RELEASES_CACHE_FILE));
+    writeJSON(RELEASES_CACHE_FILE, { fetchedAt: Date.now(), releases: slimReleases(releases) });
+  } catch { /* ignore */ }
+}
+
+/**
+ * Devuelve la lista de releases de Engram, con caché de 6h en ~/.ozali/cache.
+ * Sin caché la API anónima (60 req/h por IP) se agota rápido cuando un equipo detrás de
+ * una misma IP corre `ozali doctor`/`init` en varios repos. Si la API falla se usa el
+ * caché vencido como red de seguridad (la descarga se verifica por checksum igual).
+ * Devuelve { releases, source } o null.
+ */
+function fetchEngramReleases({ quiet = false } = {}) {
+  const cached = loadReleasesCache();
+  if (cached && cached.fresh) return { releases: cached.releases, source: "cache" };
+
+  const { body, status } = fetchGitHubAPI(ENGRAM_RELEASES_PATH);
+  let releases = null;
+  if (body) {
+    try { releases = JSON.parse(body); } catch { releases = null; }
+  }
+  if (Array.isArray(releases) && releases.length) {
+    saveReleasesCache(releases);
+    return { releases, source: "api" };
+  }
+
+  if (cached) {
+    if (!quiet) {
+      const hours = Math.round(cached.ageMs / 3600000);
+      warn(`No pude consultar los releases de Engram (${status === 403 || status === 429 ? "límite de peticiones de GitHub" : "sin red"}); uso el caché local de hace ~${hours}h.`);
+    }
+    return { releases: cached.releases, source: "stale-cache" };
+  }
+
+  if (!quiet && (status === 403 || status === 429)) {
+    warn("GitHub respondió 403/429: se agotó el límite de peticiones anónimas (60/h por IP).");
+    info("  → Autentícate para subirlo a 5000/h: " + c.bold("gh auth login") + " o " + c.bold("export GITHUB_TOKEN=…"));
+    info("  → O instala Engram con " + c.bold("brew") + " / " + c.bold("go") + " (ver opciones abajo).");
+  }
   return null;
 }
 
 /**
- * Resuelve { version, url } del binario precompilado de Engram para este SO/arch,
- * consultando la lista de releases y quedándose con el release estable más reciente
- * que contenga el asset. Devuelve null si no hay red/herramienta o no hay binario.
+ * Resuelve { version, url, asset } del binario precompilado de Engram para este SO/arch,
+ * quedándose con el release estable más reciente que contenga el asset.
+ * Devuelve null si no hay red/herramienta o no hay binario.
  */
 function resolveEngramAsset(platform, arch) {
-  const raw = fetchText(ENGRAM_RELEASES_LIST);
-  if (!raw) return null;
-  let releases;
-  try { releases = JSON.parse(raw); } catch { return null; }
-  return pickEngramAsset(releases, platform, arch);
+  const res = fetchEngramReleases();
+  if (!res) return null;
+  return pickEngramAsset(res.releases, platform, arch);
 }
 
-/** Descarga url → dest con curl (o wget como fallback). Devuelve true si tuvo éxito. */
+/**
+ * Descarga url → dest con curl (o wget como fallback), solo por HTTPS y sin permitir
+ * que un redirect degrade el protocolo. Devuelve true si tuvo éxito.
+ */
 function download(url, dest) {
-  if (which("curl")) return spawnCmd("curl", ["-fL", "--retry", "2", "-o", dest, url]) === 0;
-  if (which("wget")) return spawnCmd("wget", ["-O", dest, url]) === 0;
+  if (which("curl")) {
+    return spawnCmd("curl", ["-fL", "--proto", "=https", "--proto-redir", "=https", "--retry", "2", "--max-time", "600", "-o", dest, url]) === 0;
+  }
+  if (which("wget")) {
+    return spawnCmd("wget", ["--https-only", "--max-redirect=5", "--timeout=600", "-O", dest, url]) === 0;
+  }
   warn("No se encontró curl ni wget para descargar el binario de Engram.");
   return false;
+}
+
+/** SHA-256 en hex (minúsculas) de un archivo local. Zero-dep (node:crypto). */
+function sha256File(file) {
+  try { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
+  catch { return null; }
+}
+
+/**
+ * Verifica el tarball descargado contra el `checksums.txt` del MISMO release publicado
+ * por GoReleaser. Fail-closed: si no se puede descargar o parsear el manifiesto, o el
+ * hash no coincide, devuelve false y NO se instala nada.
+ */
+function verifyEngramTarball(tarball, assetURL, assetName, tmpDir) {
+  const checksumsURL = checksumsURLFor(assetURL);
+  if (!checksumsURL) { warn("No pude derivar la URL de checksums.txt del release."); return false; }
+
+  const manifest = path.join(tmpDir, "checksums.txt");
+  if (!download(checksumsURL, manifest)) {
+    warn("No pude descargar checksums.txt del release de Engram — no instalo un binario sin verificar.");
+    return false;
+  }
+
+  let expected = null;
+  try { expected = parseChecksums(fs.readFileSync(manifest, "utf8"), assetName); } catch { /* ignore */ }
+  if (!expected) {
+    warn(`checksums.txt no contiene una entrada válida para ${assetName} — abortando por seguridad.`);
+    return false;
+  }
+
+  const actual = sha256File(tarball);
+  if (!actual) { warn("No pude calcular el SHA-256 del archivo descargado."); return false; }
+  if (actual !== expected) {
+    err("¡El SHA-256 del binario descargado NO coincide con el publicado por el proyecto!");
+    info(`  esperado: ${expected}`);
+    info(`  obtenido: ${actual}`);
+    warn("Descarga descartada. Puede ser una descarga corrupta o manipulada; reintenta o instala con brew/go.");
+    return false;
+  }
+
+  ok(`SHA-256 verificado contra checksums.txt (${c.dim(actual.slice(0, 16) + "…")}).`);
+  return true;
 }
 
 /** Busca recursivamente un ejecutable llamado "engram" dentro de dir (1 nivel basta). */
@@ -638,46 +797,78 @@ function installEngramFromTarball() {
     return false;
   }
   const { version, url } = resolved;
-  const asset = engramAssetName(plat, process.arch, version);
+  const asset = resolved.asset || engramAssetName(plat, process.arch, version);
+
+  // Cinturón y tirantes: pickEngramAsset ya filtra, pero nunca descargamos de un origen
+  // que no sea un asset de release del repo oficial sobre HTTPS.
+  if (!isTrustedEngramURL(url)) {
+    err(`URL de descarga no confiable para Engram: ${url}`);
+    warn("Solo se aceptan assets de https://github.com/Gentleman-Programming/engram/releases/download/…");
+    return false;
+  }
+
   info(`Descargando binario precompilado de Engram ${c.bold("v" + version)} (${process.arch})…`);
 
   let tmpDir;
   try { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-engram-")); }
   catch { warn("No pude crear un directorio temporal para la descarga."); return false; }
 
-  const tarball = path.join(tmpDir, asset);
-  if (!download(url, tarball)) { warn("Falló la descarga del binario de Engram."); return false; }
-
-  if (spawnCmd("tar", ["-xzf", tarball, "-C", tmpDir]) !== 0) {
-    warn("Falló la extracción del tarball de Engram (¿tar disponible?).");
-    return false;
-  }
-
-  const binSrc = findEngramBinary(tmpDir);
-  if (!binSrc) { warn("No encontré el binario engram dentro del tarball."); return false; }
-
-  const destDir = path.join(HOME, ".local", "bin");
-  const dest = path.join(destDir, "engram");
   try {
-    ensureDir(destDir);
-    fs.copyFileSync(binSrc, dest);
-    fs.chmodSync(dest, 0o755);
-  } catch (e) {
-    warn(`No pude instalar el binario en ${destDir} (${e.message}).`);
-    return false;
-  }
+    const tarball = path.join(tmpDir, asset);
+    if (!download(url, tarball)) { warn("Falló la descarga del binario de Engram."); return false; }
 
-  // Disponible en esta corrida para los `engram setup` que vienen después.
-  const onPath = (process.env.PATH || "").split(path.delimiter).includes(destDir);
-  if (!onPath) process.env.PATH = destDir + path.delimiter + (process.env.PATH || "");
+    // Verificación de integridad ANTES de extraer ni ejecutar nada.
+    if (!verifyEngramTarball(tarball, url, asset, tmpDir)) return false;
 
-  ok(`Engram instalado en ${c.bold(dest)}.`);
-  if (!onPath) {
-    warn(`${c.bold(destDir)} no estaba en tu PATH. Para usar ${c.bold("engram")} fuera del agente, añádelo a tu shell:`);
-    console.log(`    ${c.dim('export PATH="$HOME/.local/bin:$PATH"')}`);
+    const extractDir = path.join(tmpDir, "x");
+    ensureDir(extractDir);
+    // --no-same-owner/--no-same-permissions: no heredamos uid/gid ni bits setuid del archivo.
+    if (spawnCmd("tar", ["-xzf", tarball, "-C", extractDir, "--no-same-owner", "--no-same-permissions"]) !== 0) {
+      warn("Falló la extracción del tarball de Engram (¿tar disponible?).");
+      return false;
+    }
+
+    const binSrc = findEngramBinary(extractDir);
+    if (!binSrc) { warn("No encontré el binario engram dentro del tarball."); return false; }
+
+    // El tarball no puede sacarnos del directorio temporal (path traversal / symlink).
+    let realSrc, realRoot;
+    try {
+      realSrc = fs.realpathSync(binSrc);
+      realRoot = fs.realpathSync(extractDir);
+    } catch { warn("No pude resolver la ruta del binario extraído."); return false; }
+    if (!(realSrc === realRoot || realSrc.startsWith(realRoot + path.sep))) {
+      err("El tarball intentó escribir fuera del directorio temporal — instalación abortada.");
+      return false;
+    }
+
+    const destDir = path.join(HOME, ".local", "bin");
+    const dest = path.join(destDir, "engram");
+    try {
+      ensureDir(destDir);
+      fs.copyFileSync(realSrc, dest);
+      fs.chmodSync(dest, 0o755);
+    } catch (e) {
+      warn(`No pude instalar el binario en ${destDir} (${e.message}).`);
+      return false;
+    }
+
+    // Disponible en esta corrida para los `engram setup` que vienen después.
+    const onPath = (process.env.PATH || "").split(path.delimiter).includes(destDir);
+    if (!onPath) process.env.PATH = destDir + path.delimiter + (process.env.PATH || "");
+
+    ok(`Engram instalado en ${c.bold(dest)}.`);
+    if (!onPath) {
+      warn(`${c.bold(destDir)} no estaba en tu PATH. Para usar ${c.bold("engram")} fuera del agente, añádelo a tu shell:`);
+      console.log(`    ${c.dim('export PATH="$HOME/.local/bin:$PATH"')}`);
+    }
+    return true;
+  } finally {
+    // Nunca dejamos el binario descargado (verificado o no) tirado en /tmp.
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
-  return true;
 }
+
 
 /**
  * Fase 1: Onboarding de equipo. Un dev nuevo hace `ozali init` en un repo que ya tiene

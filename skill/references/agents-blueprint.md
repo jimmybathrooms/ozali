@@ -39,8 +39,11 @@ aplicabilidad (gate CDK-first) → owner (alcance) → manager (tareas) → anal
 ## Definiciones por rol
 
 Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontmatter
-`name`, `description` (cuándo invocarlo), `model` (nivel cognitivo: `low`, `medium`, `high`)
-y herramientas, más el system prompt.
+`name`, `description` (cuándo invocarlo), `model` y herramientas, más el system prompt.
+
+> ⚠️ `model` debe llevar el **modelo real** —`haiku`, `sonnet`, `opus` o un model ID completo—
+> resuelto desde el nivel cognitivo (`low`/`medium`/`high`) vía `.ozali/config.json`.
+> Claude Code lee este campo **literal**: `model: high` no existe como modelo y falla.
 
 ### 1. project-owner
 - **Misión:** custodiar la visión y las reglas del proyecto; autorizar o rechazar el alcance.

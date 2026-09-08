@@ -1,7 +1,7 @@
 ---
 name: ozali
 description: Diagnostica, calibra y planifica la skill `cdk` de un proyecto. Úsala cuando quieras "preparar cdk", "calibrar el proyecto", "generar la estructura de agentes", "arrancar ozali desde cero" o invocar "ozali".
-model: high
+model: opus
 ---
 
 # Skill: ozali
@@ -307,12 +307,16 @@ cognitiva y modelo asignado** está en [`references/agents-blueprint.md`](refere
 | 7 | **project-documenter** | C — Escritura Docs | **medium** (híbrido) | Sonnet sencilla; Opus técnica |
 | 8 | **tester** | D — Validación | **medium** (híbrido) | Haiku ejecución; Sonnet diagnóstico |
 
-> **Resolución de modelo:** el nivel (`low`, `medium`, `high`) se resuelve a modelo real
+> **Resolución de modelo (en tiempo de generación):** el nivel (`low`, `medium`, `high`) es la
+> **clasificación de diseño**, no un valor válido de frontmatter. Claude Code lee `model:` de
+> forma **literal** y solo acepta `haiku` / `sonnet` / `opus` / `inherit` o un model ID completo;
+> escribir `model: high` produce el error *"There's an issue with the selected model (high)"*.
+> Por eso **`ozali` resuelve el nivel AL GENERAR** cada archivo y estampa ya el modelo real,
 > consultando `.ozali/config.json` → `agents.models.{claude|opencode}.{low|medium|high}`.
 > Si el config no tiene `agents` (repos inicializados antes de v0.16.2), usar defaults por
-> agente: Claude = `claude-haiku-4-5` / `claude-sonnet-4-5` / `claude-opus-4`;
+> agente: Claude = `haiku` / `sonnet` / `opus`;
 > opencode = `kimi-k3` / `deepseek-v4-pro` / `mimo-v2.5`.
-> El orquestador debe hacer este lookup al invocar cada subagente.
+> El nivel se documenta en el cuerpo del archivo, **nunca** en `model:`.
 
 Si la fuente de verdad **no** aporta suficiente para definir una identidad (responsabilidad,
 herramientas permitidas, límites), **pregunta al usuario** lo mínimo necesario. No inventes
@@ -372,12 +376,16 @@ Solo tras la aprobación de la Fase 5. Genera:
     - **estampar en el frontmatter** `cdk_contract_version: N`, con `N` = la versión de contrato
       vigente de [`references/cdk-contract.md`](references/cdk-contract.md). Esto permite que el
       pre-flight (Fase 0.5) y `ozali doctor`/`ozali update` sepan si el `cdk` está al día;
-    - **estampar en el frontmatter** `model: medium` (el orquestador `cdk` opera en nivel medio);
-    - **resolver modelo de subagentes:** el orquestador debe, al invocar cada subagente, leer
-      su `model:` del frontmatter y resolverlo a modelo real vía `.ozali/config.json` →
-      `agents.models.{claude|opencode}.{low|medium|high}`. Si `agents` no existe, usar
-      defaults: Claude = `claude-haiku-4-5` / `claude-sonnet-4-5` / `claude-opus-4`;
-      opencode = `kimi-k3` / `deepseek-v4-pro` / `mimo-v2.5`;
+    - **estampar en el frontmatter** el **modelo real** del nivel medio —`model: sonnet` con los
+      defaults, o lo que resuelva `.ozali/config.json` → `agents.models.claude.medium` (el
+      orquestador `cdk` opera en nivel medio). **Nunca** escribas `model: medium`: Claude Code
+      lee el valor literal y la skill falla al invocarse;
+    - **modelo de subagentes ya resuelto:** cada `.claude/agents/<rol>.md` se genera con el
+      **modelo real** en `model:` (lo resuelve `ozali` desde `.ozali/config.json` →
+      `agents.models.{claude|opencode}.{low|medium|high}`). Si `agents` no existe, usar
+      defaults: Claude = `haiku` / `sonnet` / `opus`;
+      opencode = `kimi-k3` / `deepseek-v4-pro` / `mimo-v2.5`. El orquestador **no** hace lookup
+      en tiempo de invocación: Claude Code aplica el `model:` del frontmatter tal cual;
    - declarar que ayuda a **generar código** (nuevo componente, fix de bug, análisis de impacto)
      respetando la fuente de verdad y los estándares del proyecto;
     - orquestar los 8 subagentes según la fase del trabajo;
@@ -456,9 +464,12 @@ Solo tras la aprobación de la Fase 5. Genera:
  2. `.claude/agents/<rol>.md` — un subagente real por cada uno de los 8 roles, con su system
     prompt y herramientas, según [`references/agents-blueprint.md`](references/agents-blueprint.md).
     Cada subagente debe:
-    - Incluir `model: {low|medium|high}` en su frontmatter, según la clasificación de Fase 4.
+    - Incluir en su frontmatter el **modelo real** correspondiente a su nivel de la Fase 4
+      (`haiku` / `sonnet` / `opus`, o el ID que resuelva `.ozali/config.json`). **Nunca** el
+      nivel abstracto: `model: high` no es un modelo y rompe la invocación del subagente.
     - Respetar las **restricciones de seguridad** arriba mencionadas.
-    - Ser resuelto a modelo real por el orquestador consultando `.ozali/config.json`.
+    - Documentar su nivel cognitivo (`low`/`medium`/`high`) en el cuerpo del archivo, para
+      trazabilidad con la clasificación de la Fase 4.
  3. `.claude/skills/cdk/verify-structure.mjs` — **harness del analista**: script Node sin
     dependencias (Node 16+) adaptado a la estructura real del proyecto. Verifica paquetes/capas
     esperados, localiza clases clave, reporta discrepancias doc↔código y, con `--grep <palabra>`,

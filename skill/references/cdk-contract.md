@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 5 -->
+<!-- CDK_CONTRACT_VERSION: 6 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `5`**
+> **Versión de contrato vigente: `6`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -189,23 +189,11 @@ Un `cdk` conforme a la v5 debe cumplir TODO lo de la v4, más:
   | `project-documenter` | C — Escritura Docs | **medium** (híbrido) | Sonnet para sencilla; Opus para técnica |
   | `tester` | D — Validación | **medium** (híbrido) | Haiku para ejecución mecánica; Sonnet para diagnóstico de fallos |
 
-  El frontmatter de cada subagente debe verse así:
-  ```yaml
-  ---
-  name: project-analyzer
-  description: Analiza impacto y riesgos de cambios de código
-  model: high
-  ---
-  ```
-
-- **Resolución de modelo:** el orquestador (`project-orchestrator`) debe, al invocar un
-  subagente, resolver el modelo real consultando `.ozali/config.json`:
-  - `agents.models.claude.low|medium|high` para Claude Code
-  - `agents.models.opencode.low|medium|high` para opencode
-  - El campo `model:` del subagente indica la clave (`low`, `medium`, `high`) a lookup.
-  - **Fallback:** si `.ozali/config.json` no tiene `agents`, usar defaults por agente:
-    Claude = `claude-haiku-4-5` / `claude-sonnet-4-5` / `claude-opus-4`;
-    opencode = `kimi-k3` / `deepseek-v4-pro` / `mimo-v2.5`.
+  > ⚠️ **El formato de frontmatter de la v5 era incorrecto y quedó SUPERSEDIDO por la
+  > [v6](#v6--el-frontmatter-model-lleva-el-modelo-real-corrige-la-v5).** La v5 estampaba el
+  > nivel abstracto (`model: high`) en el frontmatter; Claude Code lee ese campo **literal** y
+  > falla. La tabla de niveles de arriba sigue vigente como **clasificación de diseño**;
+  > la forma de escribirla en el frontmatter la define la v6.
 
 - **Reglas híbridas documentadas:**
   - `project-documenter`: si el documento a generar es técnico (`03-resumen-tecnico.md`,
@@ -218,3 +206,45 @@ Un `cdk` conforme a la v5 debe cumplir TODO lo de la v4, más:
   declarar su `model:` en su frontmatter según la misma tabla (`.ozali/config.json`).
 
 - Estampar `cdk_contract_version: 5` en su frontmatter.
+
+### v6 — el frontmatter `model:` lleva el modelo real (corrige la v5)
+Un `cdk` conforme a la v6 debe cumplir TODO lo de la v1–v5, con esta **corrección**:
+
+- **Causa del bug:** Claude Code interpreta el campo `model:` del frontmatter de skills y
+  subagentes de forma **literal**. Solo acepta `haiku`, `sonnet`, `opus`, `inherit` o un model ID
+  completo. Un `model: high` (el nivel abstracto de la v5) produce al invocar:
+  `There's an issue with the selected model (high). It may not exist or you may not have access
+  to it.` — el sufijo `[1m]` que a veces acompaña al nombre es el marcador de ventana de 1M de
+  contexto que añade la CLI, no parte del valor.
+
+- **Regla v6:** el nivel (`low`/`medium`/`high`) es **clasificación de diseño**, y se resuelve
+  **en tiempo de generación** —por `ozali`, no por el orquestador en tiempo de invocación—.
+  Cada archivo generado estampa **el modelo real**:
+
+  ```yaml
+  ---
+  name: project-analyzer
+  description: Analiza impacto y riesgos de cambios de código
+  model: opus          # nivel high, resuelto desde .ozali/config.json
+  ---
+  ```
+
+  - Fuente de resolución: `.ozali/config.json` → `agents.models.{claude|opencode}.{low|medium|high}`.
+  - **Fallback** si `.ozali/config.json` no tiene `agents`:
+    Claude = `haiku` / `sonnet` / `opus`; opencode = `kimi-k3` / `deepseek-v4-pro` / `mimo-v2.5`.
+  - Preferir los **alias** (`haiku`/`sonnet`/`opus`) sobre IDs con versión: no se rompen cuando
+    cambia la versión del modelo.
+  - El nivel cognitivo se documenta en el **cuerpo** del archivo (trazabilidad con la Fase 4),
+    **nunca** en `model:`.
+
+- **Alcance de la migración v5 → v6** (automática, sin GATE — es reescritura de frontmatter, no
+  regeneración estructural):
+  1. En `.claude/skills/cdk/SKILL.md` y en cada `.claude/agents/<rol>.md`, reemplazar
+     `model: low|medium|high` por el modelo real resuelto.
+  2. Igual en las skills hermanas si tienen el defecto: `.claude/skills/ozali-commit/SKILL.md`,
+     `.claude/skills/skill-generator/SKILL.md`.
+  3. Añadir el nivel original como comentario o línea en el cuerpo, para no perder la
+     clasificación.
+  4. Reportar al usuario qué archivos se corrigieron.
+
+- Estampar `cdk_contract_version: 6` en su frontmatter.

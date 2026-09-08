@@ -56,12 +56,88 @@ export function engramAssetName(platform, arch, version) {
   return `engram_${version}_${os}_${a}.${ext}`;
 }
 
+/** Repo oficial de Engram: única fuente aceptada para binarios descargados. */
+export const ENGRAM_REPO = "Gentleman-Programming/engram";
+const ENGRAM_DOWNLOAD_PREFIX = `/${ENGRAM_REPO}/releases/download/`;
+
+/**
+ * Valida que una URL de descarga apunte REALMENTE a un asset de release del repo
+ * oficial de Engram, sobre HTTPS. Blinda contra una respuesta de la API manipulada
+ * (o un mirror/redirect hostil) que intente colarnos un binario de otro origen.
+ * Función pura. Devuelve true/false.
+ */
+export function isTrustedEngramURL(url) {
+  let u;
+  try { u = new URL(String(url)); } catch { return false; }
+  if (u.protocol !== "https:") return false;
+  if (u.username || u.password) return false;          // https://github.com@evil/…
+  if (u.hostname !== "github.com") return false;
+  return u.pathname.startsWith(ENGRAM_DOWNLOAD_PREFIX);
+}
+
+/** URL del manifiesto `checksums.txt` del MISMO release que `assetURL`. null si la URL no es confiable. */
+export function checksumsURLFor(assetURL) {
+  if (!isTrustedEngramURL(assetURL)) return null;
+  const u = new URL(assetURL);
+  u.pathname = u.pathname.replace(/[^/]+$/, "checksums.txt");
+  u.search = "";
+  u.hash = "";
+  return u.toString();
+}
+
+/**
+ * Extrae el SHA-256 esperado de un asset desde el contenido de `checksums.txt`
+ * (formato GoReleaser/sha256sum: `<hex>  <nombre>`). Función pura.
+ * Devuelve el hash en minúsculas o null si el asset no aparece o el formato es inválido.
+ */
+export function parseChecksums(text, assetName) {
+  if (!text || !assetName) return null;
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = /^([0-9a-fA-F]{64})\s+\*?(.+?)\s*$/.exec(line.trim());
+    if (m && m[2] === assetName) return m[1].toLowerCase();
+  }
+  return null;
+}
+
+/**
+ * Proyecta la respuesta de `/releases` a solo los campos que usamos. El JSON real trae
+ * el changelog completo de cada release (decenas de KB); esto mantiene el caché chico.
+ * Función pura. Devuelve un array (vacío si la entrada no es un array).
+ */
+export function slimReleases(releases) {
+  if (!Array.isArray(releases)) return [];
+  return releases.map((r) => ({
+    tag_name: r?.tag_name ?? null,
+    draft: !!r?.draft,
+    prerelease: !!r?.prerelease,
+    published_at: r?.published_at ?? null,
+    html_url: r?.html_url ?? null,
+    assets: Array.isArray(r?.assets)
+      ? r.assets.map((a) => ({ name: a?.name ?? null, browser_download_url: a?.browser_download_url ?? null }))
+      : [],
+  }));
+}
+
+/**
+ * Lee el caché de releases y dice si sirve. Devuelve { releases, fresh } o null si el
+ * caché está vacío/corrupto. `fresh` = dentro del TTL; una entrada vencida se devuelve
+ * igual con fresh:false para poder usarla como red de seguridad si la API falla.
+ * Función pura (sin I/O).
+ */
+export function readReleasesCache(cache, now = Date.now(), ttlMs = 6 * 60 * 60 * 1000) {
+  if (!cache || !Array.isArray(cache.releases) || cache.releases.length === 0) return null;
+  const fetchedAt = Number(cache.fetchedAt) || 0;
+  if (!fetchedAt || fetchedAt > now) return null; // sin timestamp o del futuro → inservible
+  return { releases: cache.releases, fresh: now - fetchedAt < ttlMs, ageMs: now - fetchedAt };
+}
+
 /**
  * Elige el binario precompilado de Engram para un SO/arch dado a partir de la lista de
  * releases (formato de la API de GitHub `/releases`). Se queda con el release ESTABLE
  * más reciente cuyo tag sea semver `vX.Y.Z` y que **realmente contenga** el asset
  * esperado, y devuelve su `browser_download_url` real. Ignora tags no-semver (p. ej.
- * `pi-v*`, builds de Raspberry Pi que NO traen binarios) y draft/prerelease.
+ * `pi-v*`, builds de Raspberry Pi que NO traen binarios), draft/prerelease y cualquier
+ * URL que no apunte al repo oficial sobre HTTPS.
  * Función pura (sin red). Devuelve { version, url } o null.
  */
 export function pickEngramAsset(releases, platform, arch) {
@@ -74,7 +150,9 @@ export function pickEngramAsset(releases, platform, arch) {
     const name = engramAssetName(platform, arch, version);
     if (!name) return null; // SO/arch sin binario publicado
     const asset = Array.isArray(r.assets) ? r.assets.find((a) => a && a.name === name) : null;
-    if (asset && asset.browser_download_url) return { version, url: asset.browser_download_url };
+    if (!asset || !asset.browser_download_url) continue;
+    if (!isTrustedEngramURL(asset.browser_download_url)) continue; // origen no confiable → se ignora
+    return { version, url: asset.browser_download_url, asset: name };
   }
   return null;
 }
