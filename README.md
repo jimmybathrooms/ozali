@@ -14,6 +14,7 @@
 
 | Versión | Novedad |
 |---------|---------|
+| **v0.18.0** | **Workspace multi-root: el `.code-workspace` manda + referencias Maven**: `ozali workspace` toma como miembros los folders del `*.code-workspace` de VSCode/Antigravity, que pasa a ser la lista **cerrada** (los repos en disco sin declarar se reportan pero quedan fuera; `--scan-all` los incluye, `--no-code-workspace` vuelve al escaneo puro). Los miembros pueden vivir **fuera** de la raíz. Correrlo **dentro** de un repo ya no falla: sube hasta 3 niveles buscando la carpeta que agrupa y ofrece usarla como raíz. Nueva referencia **`maven-dep`**: parsea `pom.xml` (raíz + módulos de primer nivel) y cruza por `groupId:artifactId`, así que la carpeta puede llamarse distinto que el artefacto. Las referencias **escritas a mano** ya no se borran al re-correr: lo detectado se marca `"source": "auto"` y lo tuyo se conserva como `"manual"`. Fix: `ReferenceError: root is not defined` al inicializar un miembro `sin init` fuera de `--dry-run`. |
 | **v0.17.1** | **Fix: modelos de Claude como alias**: `.ozali/config.json` guardaba IDs con versión (`claude-opus-4`, `claude-sonnet-4-5`), que envejecen y contradicen el contrato CDK v6. Ahora `init` escribe los alias `haiku`/`sonnet`/`opus` y `ozali update` **migra** los configs existentes avisando del cambio (un modelo custom se respeta). Los modelos de opencode no cambian. |
 | **v0.17.0** | **Descarga de Engram verificada + contrato CDK v6**: la instalación del binario precompilado de Engram (ruta por defecto en Linux) ahora valida el **origen** de la URL (solo assets de release del repo oficial por HTTPS, sin degradar en redirects) y verifica el **SHA-256** contra el `checksums.txt` del mismo release — *fail-closed*: si no coincide, no se instala nada. Extracción acotada (`--no-same-owner`, chequeo de path traversal) y limpieza del temporal. Nuevo **caché de releases de 6h** en `~/.ozali/cache/` compartido por `doctor`/`init`/`install-engram`, con soporte de `gh` o `GITHUB_TOKEN` para no toparse con el límite de 60 req/h de la API de GitHub. **Contrato CDK v6**: el `model:` del frontmatter estampa el modelo real (`haiku`/`sonnet`/`opus`) en vez del nivel abstracto, que Claude Code rechazaba. **`.gitignore`**: `.ozali/` pasa a ser commiteable (config del equipo y docs por hito); solo se ignoran `.ozali/backups/` y `.ozali/.session-state.json`. `ozali update` migra los `.gitignore` de repos previos. |
 | **v0.16.3** | **`install-skills` + `needsNode` + Opción B + fix copsis-commit**: Nuevo comando `install-skills` instala skills globales sin `init`. `ozali update` detecta Engram faltante y skills ausentes. `ozali doctor` solo valida Node ≥ 16 cuando el proyecto lo usa (detecta `package.json` o archivos `.js/.ts`); en backends Java/Go/Python muestra "no aplica" en vez de warning. `ozali init` defaultea a `global` cuando ya existe skill global (Opción B, evita duplicados). Fix de falso positivo de `copsis-commit` en `doctor`. |
@@ -99,15 +100,22 @@ ozali workspace           # escanea repos hijos, remedia los que faltan y escrib
 ozali workspace --dry-run # solo muestra el inventario y el plan, sin escribir
 ozali workspace --yes     # no interactivo: acepta defaults y todas las referencias detectadas
 ozali workspace --depth 2 # busca repos hasta 2 niveles (para raíces con subcarpetas de grupo)
+ozali workspace --scan-all # incluye repos en disco que no estén declarados en el .code-workspace
 ozali workspace --doctor  # health-check de TODOS los repos miembros + resumen (solo CLI)
 ozali workspace --update  # actualiza skills/permisos/jarvis de TODOS los repos miembros (solo CLI)
 ```
 
-Qué hace, en orden: (1) **escanea** los repos hijos y reporta su estado —`✔ listo`, `⚠ sin calibrar`
+Si ya tenías armado el **multi-root** del editor (`*.code-workspace`), **manda él**: sus carpetas son
+la lista de miembros —aunque vivan fuera de la raíz— y los repos que estén en disco sin declarar se
+reportan pero quedan fuera (`--scan-all` los incluye). Y si corres el comando **parado dentro de uno de
+los repos**, sube solo hasta la carpeta que los agrupa y te pregunta si la usa como raíz.
+
+Qué hace, en orden: (1) **escanea** los miembros y reporta su estado —`✔ listo`, `⚠ sin calibrar`
 (falta `cdk`) o `✖ sin init`—; (2) **remedia** con `ozali init` los que no lo tienen y te **guía** para
 calibrar (correr la skill `ozali` en cada repo — eso lo hace el agente, no el CLI); (3) **infiere las
-referencias** entre repos (dependencias npm cruzadas, submódulos git, `docker-compose`) y las confirma
-contigo; y (4) escribe la config para **trabajar en conjunto**:
+referencias** entre repos (dependencias npm y **Maven** cruzadas, submódulos git, `docker-compose`) y
+las confirma contigo — las que no se pueden inferir las agregas a mano al manifiesto y **se preservan**;
+y (4) escribe la config para **trabajar en conjunto**:
 
 - `ozali-workspace.json` — manifiesto de miembros, estado y referencias.
 - `<carpeta>.code-workspace` — workspace multi-root que abre todos los repos juntos.
