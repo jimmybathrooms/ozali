@@ -258,7 +258,7 @@ test("update también instala ozali-commit en repos previos", () => {
 });
 
 // ------------------------------------------------------------------ workspace
-function wsRepo(root, name, { config = false, cdk = false, pkg = null } = {}) {
+function wsRepo(root, name, { config = false, cdk = false, pkg = null, pom = null } = {}) {
   const dir = path.join(root, name);
   fs.mkdirSync(dir, { recursive: true });
   execFileSync("git", ["init", "-q"], { cwd: dir });
@@ -271,6 +271,20 @@ function wsRepo(root, name, { config = false, cdk = false, pkg = null } = {}) {
     fs.writeFileSync(path.join(dir, ".claude", "skills", "cdk", "SKILL.md"), "---\nname: cdk\n---\n");
   }
   if (pkg) fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(pkg));
+  if (pom) fs.writeFileSync(path.join(dir, "pom.xml"), pomXml(pom));
+}
+
+/** pom.xml mínimo; incluye un plugin para verificar que no se confunde con el artifactId propio. */
+function pomXml({ groupId = "com.acme", artifactId, deps = [] }) {
+  const d = deps
+    .map((x) => `<dependency><groupId>${x.groupId || "com.acme"}</groupId><artifactId>${x.artifactId}</artifactId><version>1.0</version></dependency>`)
+    .join("");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<project><modelVersion>4.0.0</modelVersion>
+  <groupId>${groupId}</groupId><artifactId>${artifactId}</artifactId><version>1.0</version>
+  <dependencies>${d}</dependencies>
+  <build><plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-war-plugin</artifactId></plugin></plugins></build>
+</project>`;
 }
 
 test("workspace escanea y clasifica repos hijos sin escribir (dry-run)", () => {
@@ -363,6 +377,101 @@ test("workspace no trata subcarpetas de un repo como miembros (solo repos propio
     const { stdout } = run(["workspace", "--dry-run"], root);
     assert.match(stdout, /\bpkg\b/, "incluye el repo propio anidado");
     assert.doesNotMatch(stdout, /\bsrc\b/, "no incluye la subcarpeta que no es repo propio");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace detecta dependencias Maven aunque la carpeta no se llame como el artefacto", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    wsRepo(root, "core-polizas-new", { config: true, cdk: true, pom: { artifactId: "core-polizas" } });
+    wsRepo(root, "apolizas-new", {
+      config: true, cdk: true,
+      pom: { artifactId: "apolizas", deps: [{ artifactId: "core-polizas" }, { groupId: "org.json", artifactId: "json" }] },
+    });
+    const { stdout } = run(["workspace", "--dry-run"], root);
+    assert.match(stdout, /apolizas-new → core-polizas-new \(maven-dep\)/, "cruza por artifactId, no por nombre de carpeta");
+    assert.doesNotMatch(stdout, /json/, "no inventa referencias con dependencias externas");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace preserva las referencias escritas a mano al re-correr", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    wsRepo(root, "web", { config: true, cdk: true, pkg: { name: "web", dependencies: { api: "^1" } } });
+    run(["workspace", "--yes", "--no-trust"], root);
+
+    const file = path.join(root, "ozali-workspace.json");
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.ok(manifest.references.every((r) => r.source === "auto"), "lo detectado queda marcado como auto");
+    manifest.references.push({ from: "api", to: "web", kind: "rest-api" }); // relación que ozali no infiere
+    fs.writeFileSync(file, JSON.stringify(manifest, null, 2));
+
+    run(["workspace", "--yes", "--no-trust"], root);
+    const after = JSON.parse(fs.readFileSync(file, "utf8"));
+    const manual = after.references.find((r) => r.kind === "rest-api");
+    assert.ok(manual, "la referencia manual sobrevive a la re-corrida");
+    assert.equal(manual.source, "manual", "queda marcada como manual");
+    assert.ok(after.references.some((r) => r.from === "web" && r.to === "api" && r.source === "auto"), "la auto sigue ahí");
+    assert.equal(after.references.filter((r) => r.kind === "rest-api").length, 1, "no la duplica");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace toma como miembros los folders de un *.code-workspace (aunque estén fuera de la raíz)", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    const root = path.join(base, "grupo");
+    const aparte = path.join(base, "aparte");
+    fs.mkdirSync(root); fs.mkdirSync(aparte);
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    wsRepo(root, "scripts", { pkg: { name: "scripts" } }); // en disco, pero NO declarado
+    wsRepo(aparte, "legacy", { config: true, cdk: true, pkg: { name: "legacy" } });
+    fs.writeFileSync(path.join(root, "grupo.code-workspace"),
+      JSON.stringify({ folders: [{ path: "api" }, { path: "../aparte/legacy" }] }));
+
+    const { stdout } = run(["workspace", "--dry-run"], root);
+    assert.match(stdout, /legacy/, "incluye el repo declarado en el .code-workspace");
+    assert.match(stdout, /code-workspace/, "lo marca como venido del .code-workspace");
+    assert.match(stdout, /NO declarados/, "avisa del repo en disco que no está declarado");
+    assert.doesNotMatch(stdout, /Aquí correría ozali init en:[^\n]*scripts/, "no trata como miembro lo no declarado");
+
+    const todos = run(["workspace", "--dry-run", "--scan-all"], root);
+    assert.match(todos.stdout, /Aquí correría ozali init en:[^\n]*scripts/, "--scan-all sí lo incluye");
+
+    const solo = run(["workspace", "--dry-run", "--no-code-workspace"], root);
+    assert.doesNotMatch(solo.stdout, /legacy/, "--no-code-workspace vuelve al escaneo puro");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("workspace corrido DENTRO de un repo sube a la carpeta que lo agrupa", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    wsRepo(root, "web", { config: true, cdk: true, pkg: { name: "web", dependencies: { api: "^1" } } });
+    const { stdout } = run(["workspace", "--dry-run", "--yes"], path.join(root, "web"));
+    assert.match(stdout, /agrupa 2 repo/, "avisa que encontró la raíz real");
+    assert.match(stdout, /\bapi\b/, "escanea desde la carpeta padre");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace inicializa los repos sin init sin reventar (regresión: root indefinido)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    wsRepo(root, "bare", { pkg: { name: "bare" } }); // missing-init → entra a Fase B
+    const { stdout } = run(["workspace", "--yes", "--no-trust", "--no-engram"], root);
+    assert.doesNotMatch(stdout, /root is not defined/, "no revienta al heredar el knowledgeRepo");
+    assert.ok(fs.existsSync(path.join(root, "bare", ".ozali", "config.json")), "corrió ozali init en el repo sin init");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

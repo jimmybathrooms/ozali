@@ -277,6 +277,10 @@ function isKnowledgeRepo(dir) {
  * (una subcarpeta de un repo también lo está): exigimos que el toplevel de git sea `dir`.
  * Así, correr `ozali workspace` dentro de un repo NO trata sus subcarpetas como miembros.
  */
+function realOrSelf(dir) {
+  try { return fs.realpathSync(dir); } catch { return path.resolve(dir); }
+}
+
 function isRepoRoot(dir) {
   const top = tryExec("git", ["-C", dir, "rev-parse", "--show-toplevel"]);
   if (!top) return false;
@@ -302,6 +306,92 @@ function collectRepoDirs(root, depth, level = 1, acc = []) {
   return acc;
 }
 
+/** Lee el primer valor de un tag simple (`<name>valor</name>`). Zero-dep, best-effort. */
+function xmlTag(xml, name) {
+  const m = new RegExp(`<${name}>\\s*([^<]+?)\\s*</${name}>`, "i").exec(xml);
+  return m ? m[1] : null;
+}
+
+/**
+ * Coordenadas Maven de un `pom.xml`: {file, groupId, artifactId, deps[], modules[]}.
+ * Zero-dep y best-effort (regex, no parser XML): quita comentarios, aísla `<parent>` para
+ * heredar el groupId y saca las `<dependency>` antes de leer las coordenadas propias
+ * (así el primer `<artifactId>` restante es el del proyecto, no el de un plugin).
+ */
+export function readPom(file) {
+  let txt;
+  try { txt = fs.readFileSync(file, "utf8"); } catch { return null; }
+  txt = txt.replace(/<!--[\s\S]*?-->/g, "");
+  const parent = /<parent\b[^>]*>([\s\S]*?)<\/parent>/i.exec(txt);
+  const body = txt.replace(/<parent\b[^>]*>[\s\S]*?<\/parent>/gi, "");
+  const deps = [];
+  for (const m of body.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
+    const artifactId = xmlTag(m[1], "artifactId");
+    if (artifactId) deps.push({ groupId: xmlTag(m[1], "groupId"), artifactId });
+  }
+  const own = body.replace(/<dependency\b[^>]*>[\s\S]*?<\/dependency>/gi, "");
+  const artifactId = xmlTag(own, "artifactId");
+  if (!artifactId) return null;
+  const modules = [...own.matchAll(/<module>\s*([^<]+?)\s*<\/module>/gi)].map((m) => m[1].trim());
+  return { file, groupId: xmlTag(own, "groupId") || (parent ? xmlTag(parent[1], "groupId") : null), artifactId, deps, modules };
+}
+
+/** Poms de un repo: el de la raíz + los de sus `<module>` de primer nivel (multi-módulo). */
+function pomsOf(dir) {
+  const root = readPom(path.join(dir, "pom.xml"));
+  if (!root) return [];
+  const poms = [root];
+  for (const mod of root.modules) {
+    const sub = readPom(path.join(dir, mod, "pom.xml"));
+    if (sub) poms.push(sub);
+  }
+  return poms;
+}
+
+/**
+ * Repos declarados en un `*.code-workspace` (multi-root de VSCode/Antigravity) de `root`.
+ * Permite que los miembros vivan FUERA de la carpeta raíz: el editor ya los agrupó ahí.
+ * Solo se aceptan carpetas que sean raíz de su propio repo git.
+ */
+export function readCodeWorkspaceMembers(root) {
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
+  const dirs = [];
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith(".code-workspace")) continue;
+    const cfg = readJSON(path.join(root, e.name));
+    if (!cfg || !Array.isArray(cfg.folders)) continue;
+    for (const f of cfg.folders) {
+      if (!f || typeof f.path !== "string") continue;
+      const full = path.resolve(root, f.path);
+      if (isKnowledgeRepo(full) || !isRepoRoot(full)) continue;
+      dirs.push(full);
+    }
+  }
+  return dirs;
+}
+
+/**
+ * Busca hacia ARRIBA (desde `start`, hasta `maxUp` niveles) una carpeta que agrupe repos:
+ * o bien tiene un `*.code-workspace` con miembros válidos, o bien tiene repos git hijos.
+ * Sirve cuando el usuario corre `ozali workspace` parado DENTRO de uno de sus repos.
+ */
+export function findWorkspaceRootUp(start, maxUp = 3, opts = {}) {
+  let dir = path.resolve(start);
+  for (let i = 0; i <= maxUp; i++) {
+    const declared = opts.noCodeWorkspace ? [] : readCodeWorkspaceMembers(dir);
+    if (declared.length) return { root: dir, via: "code-workspace", count: declared.length };
+    if (dir !== path.resolve(start)) {
+      const scanned = collectRepoDirs(dir, 1);
+      if (scanned.length) return { root: dir, via: "scan", count: scanned.length };
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 /** Estado ozali de un repo: missing-init | needs-calibration | ready. */
 function memberStatus(hasConfig, hasCdk) {
   if (!hasConfig) return "missing-init";
@@ -316,7 +406,23 @@ function memberStatus(hasConfig, hasCdk) {
  */
 export function detectWorkspace(root, opts = {}) {
   const depth = Math.max(1, opts.depth || 1);
-  const dirs = collectRepoDirs(root, depth);
+  const scanned = collectRepoDirs(root, depth);
+  // Un *.code-workspace es una declaración EXPLÍCITA del equipo: si existe, manda. Los repos que
+  // están en disco pero no declarados NO son miembros; se reportan aparte (extras) para que el
+  // usuario decida (agregarlos al .code-workspace, o incluirlos con --scan-all).
+  const declared = opts.noCodeWorkspace ? [] : readCodeWorkspaceMembers(root);
+  const declaredSet = new Set(declared.map(realOrSelf));
+  const declares = declared.length > 0 && !opts.scanAll;
+  const dirs = [];
+  const extraDirs = [];
+  const seenDirs = new Set();
+  for (const full of [...declared, ...scanned]) {
+    const key = realOrSelf(full);
+    if (seenDirs.has(key)) continue;
+    seenDirs.add(key);
+    if (declares && !declaredSet.has(key)) { extraDirs.push(full); continue; }
+    dirs.push(full);
+  }
   const members = dirs.map((full) => {
     const hasConfig = exists(path.join(full, ".ozali", "config.json"));
     const hasCdk = exists(path.join(full, ".claude", "skills", "cdk", "SKILL.md"));
@@ -333,11 +439,14 @@ export function detectWorkspace(root, opts = {}) {
       hasCdk,
       engramProject: engramCfg && engramCfg.project_name ? engramCfg.project_name : null,
       status: memberStatus(hasConfig, hasCdk),
+      fromCodeWorkspace: declaredSet.has(realOrSelf(full)),
       git: { branch: g.branch || null, remote: g.remote || null },
     };
   }).sort((a, b) => a.dir.localeCompare(b.dir));
   const existing = readJSON(path.join(root, "ozali-workspace.json"));
-  return { root, members, existing };
+  const extras = extraDirs.map((full) => ({ dir: path.relative(root, full) || path.basename(full), path: full }))
+    .sort((a, b) => a.dir.localeCompare(b.dir));
+  return { root, members, extras, declaredBy: declares ? "code-workspace" : null, existing };
 }
 
 /**
@@ -348,9 +457,18 @@ export function detectWorkspace(root, opts = {}) {
 export function detectReferences(members) {
   const byPkg = new Map();
   const byDir = new Map();
+  const byMaven = new Map();   // "groupId:artifactId" y "artifactId" → miembro que lo publica
+  const pomsByMember = new Map();
   for (const m of members) {
     if (m.pkgName) byPkg.set(m.pkgName, m);
     byDir.set(path.basename(m.dir), m);
+    const poms = pomsOf(m.path);
+    if (poms.length) pomsByMember.set(m.dir, poms);
+    for (const pom of poms) {
+      // el artifactId solo es suficiente si nadie más lo publica; el coord completo siempre gana
+      if (pom.groupId) byMaven.set(`${pom.groupId}:${pom.artifactId}`, m);
+      if (!byMaven.has(pom.artifactId)) byMaven.set(pom.artifactId, m);
+    }
   }
   const edges = [];
   const seen = new Set();
@@ -372,7 +490,16 @@ export function detectReferences(members) {
         if (target) push(m, target, "npm-dep");
       }
     }
-    // 2) submódulos git (.gitmodules → path de cada submódulo)
+    // 2) dependencias Maven cruzadas (pom.xml del repo + sus módulos de primer nivel).
+    //    Se cruza por groupId:artifactId (o artifactId a secas): la carpeta puede llamarse
+    //    distinto que el artefacto (p. ej. `sio4-core-polizas-new` publica `sio4-core-polizas`).
+    for (const pom of pomsByMember.get(m.dir) || []) {
+      for (const d of pom.deps) {
+        const target = (d.groupId && byMaven.get(`${d.groupId}:${d.artifactId}`)) || byMaven.get(d.artifactId);
+        if (target) push(m, target, "maven-dep");
+      }
+    }
+    // 3) submódulos git (.gitmodules → path de cada submódulo)
     const gm = path.join(m.path, ".gitmodules");
     if (exists(gm)) {
       const txt = fs.readFileSync(gm, "utf8");
@@ -381,7 +508,7 @@ export function detectReferences(members) {
         if (target) push(m, target, "git-submodule");
       }
     }
-    // 3) docker-compose (build context que apunte a un repo hermano)
+    // 4) docker-compose (build context que apunte a un repo hermano)
     for (const f of ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]) {
       const cf = path.join(m.path, f);
       if (!exists(cf)) continue;

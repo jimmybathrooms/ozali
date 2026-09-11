@@ -17,17 +17,24 @@ ejecución disciplinada dentro de cada uno.
 
 Léelo en la raíz **antes de cualquier cosa**. Es lo que `ozali workspace` escribió; su esquema:
 
-- `members[]` — cada repo miembro:
-  - `path` — carpeta relativa a la raíz (el repo donde ejecutas).
+- `members[]` — cada repo miembro. **Es la lista cerrada**: si la raíz tiene un `*.code-workspace`,
+  sus folders mandan y los demás repos que haya en disco NO son miembros (quedan fuera a propósito).
+  Cada miembro trae:
+  - `path` — carpeta relativa a la raíz (el repo donde ejecutas). Puede empezar con `../`: los
+    miembros pueden venir de un `*.code-workspace` del editor y vivir fuera de la raíz.
   - `project` — **nombre del proyecto en Engram** de ese repo. Úsalo para acotar la memoria (ver §1);
     **no** dependas de `mem_current_project`, que detecta la raíz del workspace, no el miembro.
   - `status` — `ready` / `needs-calibration` / `missing-init`. **Es una foto** del último
     `ozali workspace`: puede haber quedado atrás (ver §2).
   - `sot` — variante de fuente de verdad del repo (`ai`/`ia`/…) o `null` si no la tiene.
-- `references[]` — aristas dirigidas `{ from, to, kind }` entre miembros (`from` consume a `to`):
+- `references[]` — aristas dirigidas `{ from, to, kind, source }` entre miembros (`from` consume a `to`):
   - `kind: "npm-dep"` — `from` declara a `to` en sus dependencias npm.
+  - `kind: "maven-dep"` — `from` declara en su `pom.xml` el artefacto que publica `to` (el
+    `artifactId` puede no coincidir con el nombre de la carpeta).
   - `kind: "git-submodule"` — `to` está montado como submódulo dentro de `from`.
   - `kind: "compose"` — un servicio de `from` construye desde `to` (`docker-compose`).
+  - `source: "auto"` la infirió `ozali workspace`; `source: "manual"` la escribió el equipo a mano
+    (ozali la **preserva** al re-correr). Trátalas igual: ambas son verdad.
 - `knowledgeRepo` — repo de conocimiento **compartido** por el equipo (histórico + memoria sincronizada).
 - `cloud` — config de Engram Cloud (réplica de equipo) si está habilitada.
 - `agent` — agente objetivo (`claude-code` / `opencode` / `both`).
@@ -72,6 +79,8 @@ No abras cada repo por separado. Desde este workspace prepara y calibra en secue
 - **Cambios que cruzan repos:** secuencia según las `references`, **primero el `to` (proveedor), luego
   el `from` (consumidor)**. Según el `kind`:
   - `npm-dep` — publica/enlaza el paquete de `to` antes de que `from` consuma la nueva versión.
+  - `maven-dep` — instala el artefacto de `to` (`mvn install`) antes de compilar `from`; si cambió
+    la firma pública, revisa que la versión declarada en el `pom.xml` de `from` siga siendo válida.
   - `git-submodule` — actualiza `to`, luego mueve el puntero del submódulo en `from` y verifícalo.
   - `compose` — reconstruye el servicio de `to` antes de levantar `from`.
 - Deja registrado en la memoria de **cada** repo qué cambió y por qué, enlazando ambos lados de la

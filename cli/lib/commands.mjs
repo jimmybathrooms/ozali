@@ -12,7 +12,7 @@ import {
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
   toPortablePath, fromPortablePath, parseSemver, compareSemver,
 } from "./util.mjs";
-import { detectAll, detectSourceOfTruth, detectWorkspace, detectReferences } from "./detect.mjs";
+import { detectAll, detectSourceOfTruth, detectWorkspace, detectReferences, findWorkspaceRootUp } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
 
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
@@ -1300,15 +1300,36 @@ export async function workspace(cwd, opts = {}) {
   step("ozali workspace — configuración multi-repo");
   const depth = opts.depth ? (parseInt(opts.depth, 10) || 1) : 1;
 
-  // Fase A — escaneo (read-only)
-  let ws = detectWorkspace(cwd, { depth });
+  // Fase A — escaneo (read-only). Miembros = repos git hijos + folders de un *.code-workspace.
+  let root = cwd;
+  let ws = detectWorkspace(root, { depth, noCodeWorkspace: opts.noCodeWorkspace, scanAll: opts.scanAll });
   if (ws.members.length === 0) {
-    warn("No encontré repositorios git como hijos de esta carpeta.");
-    info("Corre " + c.bold("ozali workspace") + " desde la carpeta que agrupa tus repos (o usa " + c.bold("--depth 2") + ").");
-    return 1;
+    // Caso típico: se corrió PARADO DENTRO de un repo. Busca hacia arriba la carpeta que agrupa.
+    const up = findWorkspaceRootUp(cwd, 3, { noCodeWorkspace: opts.noCodeWorkspace });
+    if (!up) {
+      warn("No encontré repositorios git como hijos de esta carpeta.");
+      info("Corre " + c.bold("ozali workspace") + " desde la carpeta que agrupa tus repos (o usa " + c.bold("--depth 2") + ").");
+      info("También sirve una carpeta con un " + c.bold("*.code-workspace") + " de VSCode/Antigravity: sus folders se toman como miembros.");
+      return 1;
+    }
+    const via = up.via === "code-workspace" ? "por su *.code-workspace" : "por sus repos hijos";
+    warn(`Aquí no hay repos hijos, pero ${c.bold(up.root)} agrupa ${up.count} repo(s) ${c.dim("(" + via + ")")}.`);
+    const go = opts.yes ? true : await confirm(`¿Uso ${c.bold(up.root)} como raíz del workspace?`, true);
+    if (!go) { info("Cancelado. Corre " + c.bold("ozali workspace") + " desde la carpeta que agrupa tus repos."); return 1; }
+    root = up.root;
+    ws = detectWorkspace(root, { depth, noCodeWorkspace: opts.noCodeWorkspace, scanAll: opts.scanAll });
+    if (ws.members.length === 0) { warn("Tampoco encontré repos ahí."); return 1; }
   }
+  cwd = root;
   step("Repos detectados");
+  if (ws.declaredBy === "code-workspace") {
+    info(`Miembros tomados del ${c.bold("*.code-workspace")} del editor (manda sobre el escaneo).`);
+  }
   printMembers(ws.members);
+  if (ws.extras && ws.extras.length) {
+    warn(`${ws.extras.length} repo(s) en disco NO declarados en el .code-workspace: ${c.bold(ws.extras.map((e) => e.dir).join(", "))}.`);
+    info(`Quedan fuera. Para incluirlos: agrégalos al ${c.bold(".code-workspace")} en tu editor, o corre con ${c.bold("--scan-all")}.`);
+  }
 
   // Modos batch (Track 1): operan sobre los miembros del workspace ya existente y salen.
   if (opts.wsDoctor) return await workspaceDoctor(ws.members, opts);
@@ -1331,7 +1352,7 @@ export async function workspace(cwd, opts = {}) {
       if (!go) { info(`Saltado: ${m.dir}.`); continue; }
       await init(m.path, { ...opts, ...shared });
     }
-    ws = detectWorkspace(cwd, { depth }); // re-escanea tras remediar
+    ws = detectWorkspace(cwd, { depth, noCodeWorkspace: opts.noCodeWorkspace, scanAll: opts.scanAll }); // re-escanea tras remediar
   }
 
   // Guía de calibración (el CLI NO puede calibrar; lo hace el agente)
@@ -1455,7 +1476,8 @@ function printMembers(members) {
     const label = (STATUS_LABEL[m.status] || (() => m.status))();
     const sot = m.sot.found ? c.dim(`sot:${m.sot.variant}`) : c.dim("sot:—");
     const eng = m.engramProject ? c.dim(` engram:${m.engramProject}`) : "";
-    console.log(`  ${c.bold(m.dir.padEnd(pad))}  ${label}  ${sot}${eng}`);
+    const ws = m.fromCodeWorkspace ? c.dim(" ·code-workspace") : "";
+    console.log(`  ${c.bold(m.dir.padEnd(pad))}  ${label}  ${sot}${eng}${ws}`);
   }
 }
 
@@ -1486,13 +1508,34 @@ function writeWorkspaceManifest(root, members, references, opts) {
     ),
     cloud: base.cloud || existing.cloud || { enabled: false },
     members: members.map((m) => ({ path: m.dir, project: m.project, status: m.status, sot: m.sot.found ? m.sot.variant : null })),
-    references: references.map((e) => ({ from: e.fromDir, to: e.toDir, kind: e.kind })),
+    references: mergeReferences(existing.references, references),
     createdAt: existing.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
   writeJSON(WS_MANIFEST(root), manifest);
-  ok(`Manifiesto escrito en ${c.bold("ozali-workspace.json")} (${members.length} repos, ${references.length} referencias).`);
+  const manual = manifest.references.filter((r) => r.source === "manual").length;
+  ok(`Manifiesto escrito en ${c.bold("ozali-workspace.json")} (${members.length} repos, ${manifest.references.length} referencias${manual ? `, ${manual} manual(es) preservada(s)` : ""}).`);
+  if (manual) info(`Las referencias con ${c.bold('"source": "manual"')} las escribiste tú: ozali no las toca al re-correr.`);
   return manifest;
+}
+
+/**
+ * Une las referencias auto-detectadas con las que el usuario escribió a mano en el manifiesto.
+ * Regla: todo lo detectado se reescribe como `source: "auto"`; lo que estaba antes y NO se
+ * volvió a detectar se conserva como `source: "manual"` (así un `maven-dep` agregado a mano —o
+ * cualquier relación que ozali no sabe inferir— sobrevive a la siguiente corrida).
+ */
+function mergeReferences(previous, detected) {
+  const key = (r) => `${r.from}→${r.to}:${r.kind || ""}`;
+  const auto = detected.map((e) => ({ from: e.fromDir, to: e.toDir, kind: e.kind, source: "auto" }));
+  const seen = new Set(auto.map(key));
+  const kept = [];
+  for (const r of Array.isArray(previous) ? previous : []) {
+    if (!r || !r.from || !r.to || seen.has(key(r))) continue;
+    seen.add(key(r));
+    kept.push({ from: r.from, to: r.to, kind: r.kind || "manual", source: "manual" });
+  }
+  return [...auto, ...kept];
 }
 
 function writeCodeWorkspace(root, members) {

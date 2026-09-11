@@ -21,8 +21,9 @@ ${c.bold("Comandos:")}
   install-engram
             Instala (o reinstala) Engram bajo demanda, registra su MCP en el agente
             y activa modo hybrid. Úsalo cuando saltaste la instalación en init.
-  workspace Multi-repo: escanea los repos de la carpeta raíz, remedia los que no tienen
-            ozali init, guía la calibración y escribe la config para trabajar en conjunto.
+  workspace Multi-repo: toma los repos de la carpeta raíz (y los folders de un
+            *.code-workspace de VSCode/Antigravity), remedia los que no tienen ozali init,
+            guía la calibración y escribe la config para trabajar en conjunto.
             Con --doctor / --update opera sobre TODOS los repos miembros desde la raíz.
   doctor    Health-check read-only del proyecto (fuente de verdad, Engram, versión de cdk, TDD…).
    update    Actualiza la instalación (skills ozali + ozali-commit + ozali-jarvis + permisos)
@@ -40,6 +41,8 @@ ${c.bold("Opciones comunes:")}
   --agent <a>          (init) claude-code | opencode | both.
   --scope <s>          (init) project | global.
   --depth <n>          (workspace) Niveles a escanear bajo la raíz (default 1).
+  --no-code-workspace  (workspace) Ignora los folders del *.code-workspace; solo escanea.
+  --scan-all           (workspace) Incluye también los repos en disco no declarados en él.
   --doctor             (workspace) Health-check de TODOS los repos miembros + resumen.
   --update             (workspace) Actualiza (skills/permisos/jarvis) TODOS los repos miembros.
    --knowledge-repo <p> (init) Ruta del repo de conocimiento.
@@ -92,6 +95,8 @@ function parseArgs(argv) {
     else if (a === "--agent") opts.agent = argv[++i];
     else if (a === "--scope") opts.scope = argv[++i];
     else if (a === "--depth") opts.depth = argv[++i];
+    else if (a === "--no-code-workspace") opts.noCodeWorkspace = true;
+    else if (a === "--scan-all") opts.scanAll = true;
     else if (a === "--doctor") opts.wsDoctor = true;
     else if (a === "--update") opts.wsUpdate = true;
     else if (a === "--knowledge-repo") opts.knowledgeRepo = argv[++i];
