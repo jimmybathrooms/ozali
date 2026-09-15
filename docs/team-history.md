@@ -30,14 +30,16 @@ ozali-knowledge/                 (repo GitHub aparte, compartido por el equipo)
 ```
 
 El repo principal gana `.ai/` (cerebro), las skills bajo `.claude/skills/` y `.ozali/` (config del
-equipo + docs por hito). Su `.gitignore` excluye solo el **ruido local**: `.ozali/backups/`,
-`.ozali/.session-state.json` y `.engram/`.
+equipo + docs por hito). Su `.gitignore` excluye solo lo **local y derivado**: `.ozali/backups/`
+(copias pesadas de skills), `.ozali/.session-state.json` (cambia en cada corrida),
+`.ozali/metrics/` (caché de telemetría que `cdk` reescribe en cada hito; lo durable son el doc
+`06-uso-tokens.md` y el agregado en Engram) y `.engram/`.
 
 ## Cómo lo cablea el CLI
 
 - `ozali init` → detecta/clona el repo de conocimiento (default `~/.ozali/knowledge`), añade al
-  `.gitignore` del repo principal solo el ruido local (`.ozali/backups/`,
-  `.ozali/.session-state.json`, `.engram/`) y apunta el export de Engram ahí. Si una corrida vieja
+  `.gitignore` del repo principal solo lo local y derivado (`.ozali/backups/`,
+  `.ozali/.session-state.json`, `.ozali/metrics/`, `.engram/`) y apunta el export de Engram ahí. Si una corrida vieja
   ignoraba `.ozali/` entero —o el agente agregó `.ozali/docs/`—, `init`/`update` retiran esas reglas.
 - `cdk` (durante el trabajo) → escribe los docs por hito en `.ozali/docs/cdk/<hito>/` del repo
   principal; `ozali sync` los espeja al repo de conocimiento.

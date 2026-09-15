@@ -344,7 +344,9 @@ artefacto, menos cuesta recuperarlo después.
   `cdk/_project/token-metrics`.
 - También escribe un resumen **local** en `.ozali/metrics/token-metrics.json` (últimos N hitos:
   `{ hito, input, output, total, savedByRecall, at }`) para que `ozali doctor` muestre la tendencia
-  sin consultar el MCP.
+  sin consultar el MCP. Ese archivo es un **caché derivado y va gitignored**: se reescribe entero en
+  cada hito (puro conflicto de merge, cero ganancia). Lo durable son este agregado en Engram y el
+  doc `06-uso-tokens.md` del hito, que sí viaja en el repo.
 - **Al iniciar**, recupera `cdk/_project/token-metrics`: si hitos similares fueron pesados, sé más
   agresivo con recall-first (resume antes, evita relecturas grandes).
 

@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   engramAssetName, pickEngramAsset, isTrustedEngramURL, checksumsURLFor, parseChecksums,
-  slimReleases, readReleasesCache, migrateClaudeModelAliases,
+  slimReleases, readReleasesCache, migrateClaudeModelAliases, gitTracks,
   toPortablePath, fromPortablePath,
 } from "../lib/util.mjs";
 
@@ -535,6 +535,7 @@ test(".gitignore ignora solo el ruido local; .ozali/ es commiteable", () => {
     assert.match(gi, /^\.ozali\/\.session-state\.json$/m, "ignora el state de sesión");
     assert.match(gi, /^\.engram\/$/m, "ignora .engram/");
     assert.doesNotMatch(gi, /^\.ozali\/docs/m, "la doc por hito de cdk se versiona en el repo principal");
+    assert.match(gi, /^\.ozali\/metrics\/$/m, "la telemetría de tokens es caché local derivado: fuera del repo");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -555,6 +556,7 @@ test("update migra un .gitignore legado (.ozali/* → solo ruido local)", () => 
     assert.doesNotMatch(gi, /!\.ozali\/cloud\.json/, "update retira la negación obsoleta");
     assert.match(gi, /^\.ozali\/backups\/$/m, "update agrega el ignore de backups");
     assert.match(gi, /^\.ozali\/\.session-state\.json$/m, "update agrega el ignore del state");
+    assert.match(gi, /^\.ozali\/metrics\/$/m, "update agrega el ignore de la telemetría");
     assert.match(gi, /^node_modules\/$/m, "no toca reglas ajenas");
     assert.equal(gi.match(/# ozali — histórico aislado/g).length, 1, "no duplica el encabezado del bloque");
   } finally {
@@ -581,6 +583,42 @@ test("init/update retiran .ozali/docs/ si el agente la metió al .gitignore", ()
     assert.doesNotMatch(gi, /^\.ozali\/docs\/cdk\/$/m, "update retira también la variante por-skill");
     assert.match(gi, /^\.ozali\/backups\/$/m, "no se lleva por delante el ignore de backups");
     assert.match(gi, /^\.engram\/$/m, "no toca .engram/");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("update avisa cómo destrackear .ozali/metrics/ si ya estaba versionado", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+
+    // Simula un repo de antes de la regla: la telemetría quedó en el índice de git.
+    fs.mkdirSync(path.join(dir, ".ozali", "metrics"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ozali", "metrics", "token-metrics.json"), '{"hits":[]}');
+    execFileSync("git", ["add", "-f", ".ozali/metrics/token-metrics.json"], { cwd: dir });
+    // Y su .gitignore todavía no tiene la regla.
+    const gi0 = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
+    fs.writeFileSync(path.join(dir, ".gitignore"), gi0.replace(/^\.ozali\/metrics\/\n/m, ""));
+
+    const { stdout } = run(["update"], dir);
+
+    assert.match(fs.readFileSync(path.join(dir, ".gitignore"), "utf8"), /^\.ozali\/metrics\/$/m, "update agrega la regla");
+    assert.match(stdout, /git rm -r --cached \.ozali\/metrics/, "avisa cómo sacarlo del índice");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gitTracks distingue lo que está en el índice de lo que no", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, "algo"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "algo", "x.txt"), "x");
+    assert.equal(gitTracks(dir, "algo"), false, "sin git add no está trackeado");
+    execFileSync("git", ["add", "algo/x.txt"], { cwd: dir });
+    assert.equal(gitTracks(dir, "algo"), true, "tras git add sí");
+    assert.equal(gitTracks(dir, "no-existe"), false, "una ruta inexistente nunca está trackeada");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

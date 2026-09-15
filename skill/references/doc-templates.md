@@ -314,7 +314,9 @@ proyecto (ver [`engram-convention.md`](engram-convention.md) §7):
 
 - `cdk/{hito}/uso-tokens` — métricas del hito (mismo contenido que el doc).
 - `cdk/_project/token-metrics` — agregado de los últimos hitos (para ajustar el recall-first).
-- `.ozali/metrics/token-metrics.json` — copia **local** que lee `ozali doctor` para la tendencia:
+- `.ozali/metrics/token-metrics.json` — caché **local y derivado** que lee `ozali doctor` para la
+  tendencia. **Va gitignored**: se reescribe en cada hito y la copia durable son el doc
+  `06-uso-tokens.md` del hito (commiteado) y `cdk/_project/token-metrics` en Engram.
 
 ```json
 {

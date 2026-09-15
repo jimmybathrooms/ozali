@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import {
   c, ok, warn, err, info, step,
   SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
-  ensureGitignore, pruneGitignore, GITIGNORE_OBSOLETE, migrateClaudeModelAliases,
+  ensureGitignore, pruneGitignore, GITIGNORE_OBSOLETE, gitTracks, migrateClaudeModelAliases,
   tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
   isTrustedEngramURL, checksumsURLFor, parseChecksums, slimReleases, readReleasesCache,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
@@ -19,9 +19,17 @@ const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
 const CONFIG_LOCAL_PATH = (cwd) => path.join(cwd, ".ozali", "config.local.json");
 const TEAM_CLOUD_PATH = (cwd) => path.join(cwd, ".ozali", "cloud.json");
 
-// Lo único de ozali que NO va al repo: backups de skills (pesados) y el state de sesión
-// (cambia en cada corrida). El resto de .ozali/ —config.json, docs— es del equipo.
-const GITIGNORE_ENTRIES = [".ozali/backups/", ".ozali/.session-state.json", ".engram/"];
+// Lo único de ozali que NO va al repo es lo local y derivado: backups de skills (pesados), el
+// state de sesión (cambia en cada corrida) y la telemetría de tokens — un caché que cdk reescribe
+// en cada hito para que `doctor` muestre la tendencia sin consultar el MCP. La copia durable de
+// esas métricas vive en Engram (`cdk/_project/token-metrics`) y en el doc `06-uso-tokens.md` del
+// hito, que sí se commitea. El resto de .ozali/ —config.json, docs— es del equipo.
+const GITIGNORE_ENTRIES = [
+  ".ozali/backups/",
+  ".ozali/.session-state.json",
+  ".ozali/metrics/",
+  ".engram/",
+];
 
 /** Lee config.json y mergea config.local.json encima (local gana, igual que .claude/settings.local.json). */
 function readMergedConfig(cwd) {
@@ -2102,7 +2110,13 @@ export async function update(cwd, opts = {}) {
       info("  " + c.bold(".ozali/") + " (config del equipo y docs por hito) ahora se commitea; fuera quedan backups y state de sesión.");
       info("  Si ya tenías archivos de " + c.bold(".ozali/") + " sin trackear, aparecerán en tu próximo " + c.bold("git status") + ".");
     }
-    if (added.length) ok(`.gitignore actualizado: ${added.join(", ")}.`);
+    if (added.length) {
+      ok(`.gitignore actualizado: ${added.join(", ")}.`);
+      if (added.includes(".ozali/metrics/") && gitTracks(cwd, ".ozali/metrics")) {
+        info("  " + c.bold(".ozali/metrics/") + " ya estaba versionado: agregar la regla no lo destrackea.");
+        info("  Para sacarlo del índice sin borrarlo del disco: " + c.bold("git rm -r --cached .ozali/metrics"));
+      }
+    }
   }
 
   // 4) Skill cdk: la genera/migra el AGENTE (Fase 0.5/6); el CLI solo detecta versión y guía.

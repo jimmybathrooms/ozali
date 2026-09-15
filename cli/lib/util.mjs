@@ -261,6 +261,15 @@ export function gitInfo(cwd) {
   };
 }
 
+/**
+ * ¿Hay algo bajo `rel` ya trackeado por git? Agregar una regla al .gitignore no destrackea lo
+ * que ya estaba en el índice, así que `update` necesita saberlo para avisar al usuario.
+ */
+export function gitTracks(cwd, rel) {
+  const out = tryExec("git", ["ls-files", "--", rel], { cwd });
+  return Boolean(out && out.trim());
+}
+
 /** Nombre de proyecto normalizado (remoto git → minúsculas; si no, carpeta). */
 export function projectName(cwd) {
   const g = gitInfo(cwd);
