@@ -205,6 +205,7 @@ Claude Code y opencode (perfiles de permisos para ambos en
 | Desplegar Engram Cloud (Google Cloud) | [docs/deploy-cloud-gcloud.md](docs/deploy-cloud-gcloud.md) |
 | Integración con Obsidian | [docs/obsidian-integration.md](docs/obsidian-integration.md) |
 | Troubleshooting: Engram MCP no carga | [docs/troubleshooting/engram-mcp-no-carga.md](docs/troubleshooting/engram-mcp-no-carga.md) |
+| Pendientes (backlog corto) | [docs/pendientes.md](docs/pendientes.md) |
 | Skill bootstrap | [skill/SKILL.md](skill/SKILL.md) |
 | Calibración de testing + TDD | [skill/references/calibration-blueprint.md](skill/references/calibration-blueprint.md) |
 | Contrato y versión de `cdk` | [skill/references/cdk-contract.md](skill/references/cdk-contract.md) |
