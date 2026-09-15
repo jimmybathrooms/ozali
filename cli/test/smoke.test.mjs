@@ -534,6 +534,7 @@ test(".gitignore ignora solo el ruido local; .ozali/ es commiteable", () => {
     assert.match(gi, /^\.ozali\/backups\/$/m, "ignora los backups de skills");
     assert.match(gi, /^\.ozali\/\.session-state\.json$/m, "ignora el state de sesión");
     assert.match(gi, /^\.engram\/$/m, "ignora .engram/");
+    assert.doesNotMatch(gi, /^\.ozali\/docs/m, "la doc por hito de cdk se versiona en el repo principal");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -556,6 +557,30 @@ test("update migra un .gitignore legado (.ozali/* → solo ruido local)", () => 
     assert.match(gi, /^\.ozali\/\.session-state\.json$/m, "update agrega el ignore del state");
     assert.match(gi, /^node_modules\/$/m, "no toca reglas ajenas");
     assert.equal(gi.match(/# ozali — histórico aislado/g).length, 1, "no duplica el encabezado del bloque");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init/update retiran .ozali/docs/ si el agente la metió al .gitignore", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+
+    // Simula lo que hacía el agente al calibrar siguiendo su propio SKILL.md, que decía
+    // (mal) que la doc por hito iba gitignored en el repo principal.
+    const gi0 = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
+    fs.writeFileSync(path.join(dir, ".gitignore"),
+      gi0.replace(/^\.ozali\/backups\/$/m, ".ozali/backups/\n.ozali/docs/\n.ozali/docs/cdk/"));
+    assert.match(fs.readFileSync(path.join(dir, ".gitignore"), "utf8"), /^\.ozali\/docs\/$/m, "precondición: la regla está");
+
+    run(["update"], dir);
+
+    const gi = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
+    assert.doesNotMatch(gi, /^\.ozali\/docs\/$/m, "update retira .ozali/docs/");
+    assert.doesNotMatch(gi, /^\.ozali\/docs\/cdk\/$/m, "update retira también la variante por-skill");
+    assert.match(gi, /^\.ozali\/backups\/$/m, "no se lleva por delante el ignore de backups");
+    assert.match(gi, /^\.engram\/$/m, "no toca .engram/");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

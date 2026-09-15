@@ -494,8 +494,12 @@ Esto lo produce la skill **`cdk`** (no `ozali`), una vez por **cada solicitud/hi
 Es responsabilidad del subagente `project-documenter`. `ozali` debe **cablear este comportamiento**
 dentro del `SKILL.md` de `cdk` que genera en la Fase 6.
 
-- **Ruta base:** `.ozali/docs/cdk/` — **gitignored en el repo principal** y sincronizada al repo
-  de conocimiento aislado (ver [team-history](../docs/team-history.md)).
+- **Ruta base:** `.ozali/docs/cdk/` — **se versiona en el repo principal** (viaja con el código que
+  documenta y se revisa en el PR) **y** se sincroniza al repo de conocimiento aislado
+  (ver [team-history](../docs/team-history.md)).
+  > No agregues `.ozali/docs/` al `.gitignore`: lo que queda fuera del repo es solo el ruido local
+  > (`.ozali/backups/`, `.ozali/.session-state.json`). `ozali init`/`update` retiran esa regla si
+  > una corrida vieja la escribió.
 - **Carpeta por hito:** `<hito>/` — slug corto y descriptivo (ej. `alta-componente-cobranza`).
   Si ya existe, agrega sufijo `-2`, `-3`, …
 - **Contenido (6 `.md`):**

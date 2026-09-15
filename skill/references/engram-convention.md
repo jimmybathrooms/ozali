@@ -296,7 +296,8 @@ ozali sync --import   # pull del repo de conocimiento → import a Engram local 
 Internamente (Fase C lo implementa):
 1. `engram sync` exporta las memorias del proyecto a `.engram/` (chunks + manifest).
 2. Copia `.engram/` y `.ozali/docs/cdk/` a `ozali-knowledge/{engram,projects/<project>/...}`.
-3. Commit + push del repo de conocimiento (no del repo principal, que los tiene gitignored).
+3. Commit + push del repo de conocimiento. Los docs por hito **también** viven en el repo
+   principal (se commitean ahí); el repo de conocimiento es el espejo que acumula entre proyectos.
 4. `--import` hace lo inverso: clona/pull del repo de conocimiento y `engram sync --import`.
 
 > Trazabilidad: cada doc lleva `ultimo_commit`/`Commit:` del repo principal en su encabezado, así

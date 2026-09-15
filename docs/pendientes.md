@@ -6,69 +6,38 @@ entrada (el histórico queda en el commit).
 
 ---
 
-## P-001 · `.ozali/docs/` debe versionarse en el repo principal
+## P-002 · Decidir el destino de `.ozali/metrics/`
 
-**Relevancia:** Alta · **Detectado:** 2026-09-15, calibrando el repo `landing` · **Estado:** abierto
+**Relevancia:** Media · **Detectado:** 2026-09-15, calibrando el repo `landing` · **Estado:** abierto
 
-### Decisión del equipo
+### La pregunta
 
-La documentación por hito que genera `cdk` (`.ozali/docs/cdk/<hito>/`, los 6 `.md`) **sí se sube
-al repo principal**. Deja de ser exclusiva del repo de conocimiento aislado: vive junto al código
-que documenta, se revisa en el PR y viaja con el clon.
+`.ozali/metrics/token-metrics.json` es la telemetría de uso de tokens que `cdk` agrega al cerrar
+cada hito y que lee `ozali doctor`. Hoy **nadie decidió si se versiona**, y eso produce repos
+inconsistentes:
 
-El repo de conocimiento sigue existiendo para la memoria de Engram y para el agregado entre repos;
-lo que cambia es que el repo principal ya no la esconde.
+- El **CLI** no la ignora → en un repo inicializado por `ozali init`, la telemetría se commitea.
+- En **`landing`**, ajustada a mano, sí quedó ignorada.
 
-### Qué está mal hoy
+Ambos comportamientos son defendibles y por eso hay que elegir uno:
 
-El **CLI ya es correcto** — `GITIGNORE_ENTRIES` (`cli/lib/commands.mjs:24`) es
-`[".ozali/backups/", ".ozali/.session-state.json", ".engram/"]`: no ignora `.ozali/docs/`. El
-mensaje de `ozali update` incluso lo dice en voz alta (*".ozali/ (config del equipo y docs por
-hito) ahora se commitea"*).
-
-El problema es que **la documentación de la skill contradice al CLI**, y el agente le hace caso a
-la documentación:
-
-| Archivo | Línea | Dice |
+| Opción | A favor | En contra |
 |---|---|---|
-| `skill/SKILL.md` | ~497 | "**Ruta base:** `.ozali/docs/cdk/` — **gitignored en el repo principal**…" |
-| `skill/references/engram-convention.md` | ~299 | "Commit + push del repo de conocimiento (no del repo principal, que los tiene gitignored)." |
+| **Versionarla** | La evolución del costo por hito es historia del equipo, y se revisa en el PR | Cambia en cada hito: ruido en los diffs, conflictos de merge casi garantizados en un JSON agregado |
+| **Ignorarla** | Es ruido local que cambia siempre, como `.session-state.json` | Se pierde el histórico de costo salvo que `ozali sync` lo espeje al repo de conocimiento |
 
-Resultado observado en `landing`: el agente, siguiendo su propio `SKILL.md`, agregó
-`.ozali/docs/` al `.gitignore` del repo — deshaciendo lo que el CLI había dejado bien. Un repo
-inicializado por CLI queda correcto; uno **calibrado por el agente** queda mal.
+### Qué hay que cambiar, según la decisión
 
-### Qué hay que cambiar
+- **Si se ignora:** sumar `.ozali/metrics/` a `GITIGNORE_ENTRIES` (`cli/lib/commands.mjs:24`) y
+  asegurar que `ozali sync` la espeje al repo de conocimiento para no perder el histórico.
+- **Si se versiona:** sumarla a `GITIGNORE_OBSOLETE` (`cli/lib/util.mjs`) para retirarla de los
+  repos donde ya se ignoró a mano, y documentar en `docs/team-history.md` que es parte de lo que
+  viaja en el repo principal.
 
-1. **`skill/SKILL.md`** → en *"Documentación por hito de `cdk`"*, reemplazar
-   "gitignored en el repo principal" por que **se versiona en el repo principal** y además se
-   sincroniza al repo de conocimiento.
-2. **`skill/references/engram-convention.md`** → corregir el paso 3 de `ozali sync`: los docs ya
-   no están gitignored en el repo principal.
-3. **`cli/lib/util.mjs`** → agregar `.ozali/docs/` (y `.ozali/docs/cdk/`) a `GITIGNORE_OBSOLETE`,
-   para que `pruneGitignore` las **retire** en repos donde una corrida previa del agente ya las
-   metió. Sin esto, `ensureGitignore` solo agrega y un repo contaminado se queda así para siempre
-   — es el mismo motivo por el que existe `GITIGNORE_OBSOLETE` para `.ozali/*`.
-4. **`cli/test/smoke.test.mjs`** → extender el test
-   *".gitignore ignora solo el ruido local; .ozali/ es commiteable"* con un caso que parta de un
-   `.gitignore` que **sí** tenga `.ozali/docs/` y verifique que `init`/`update` lo retiran.
-5. Revisar si `.ozali/metrics/` corre la misma suerte (telemetría de tokens). Hoy el CLI tampoco
-   lo ignora; decidir si se versiona o si entra a `GITIGNORE_ENTRIES` de forma explícita.
-
-### Cómo se verifica
-
-```bash
-# en un repo limpio
-ozali init
-grep -n "\.ozali/docs" .gitignore   # → sin coincidencias
-
-# en un repo ya contaminado por el agente
-printf '\n.ozali/docs/\n' >> .gitignore
-ozali update
-grep -n "\.ozali/docs" .gitignore   # → sin coincidencias (pruneGitignore la retiró)
-```
+En cualquiera de los dos casos: un test en `cli/test/smoke.test.mjs` que fije el comportamiento,
+como el que ya existe para `.ozali/docs/`.
 
 ### Referencias
 
-- Corrida que lo detectó: `landing` → `.ai/ozali/logs/ozali.log_26-09-15/`
-- Memoria Engram (proyecto `ozali`): pendiente `P-001`
+- Corrida que lo detectó: `landing` → `.ai/ozali/logs/ozali.log_26-09-15/03-mejoras.md`
+- Hermano cerrado: **P-001** (`.ozali/docs/` se versiona) — ver commit de esta entrada.

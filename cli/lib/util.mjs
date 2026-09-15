@@ -274,8 +274,22 @@ export function projectName(cwd) {
 // ---- .gitignore idempotente -------------------------------------------------
 export const GITIGNORE_HEADER = "# ozali — histórico aislado (no commitear en el repo principal)";
 
-/** Reglas que ozali escribía antes y que hoy sobran: `.ozali/` se commitea (config del equipo). */
-export const GITIGNORE_OBSOLETE = [".ozali/*", "!.ozali/cloud.json"];
+/**
+ * Reglas que ozali escribía antes y que hoy sobran: `.ozali/` se commitea (config del equipo).
+ *
+ * Las variantes de `.ozali/docs/` no las escribió nunca el CLI: las metía el **agente** al
+ * calibrar, porque su `SKILL.md` decía —mal— que la doc por hito iba gitignored en el repo
+ * principal. Van acá porque `ensureGitignore` solo agrega: sin podarlas, un repo que el agente
+ * ya ensució se queda así para siempre aunque corra `ozali update`.
+ */
+export const GITIGNORE_OBSOLETE = [
+  ".ozali/*",
+  "!.ozali/cloud.json",
+  ".ozali/docs",
+  ".ozali/docs/",
+  ".ozali/docs/cdk",
+  ".ozali/docs/cdk/",
+];
 
 export function ensureGitignore(cwd, entries) {
   const gi = path.join(cwd, ".gitignore");

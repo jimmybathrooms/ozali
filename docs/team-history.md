@@ -10,7 +10,7 @@ del proyecto, y que el conocimiento sea **compartible por el equipo**.
 | Capa | Qué es | Dónde vive | Por qué |
 |---|---|---|---|
 | **Cerebro** (fuente de verdad) | `.ai/` + `AI.md` | **repo principal** (commiteado) | son las reglas; chico, crece lento, debe viajar con el código |
-| **Histórico** (docs) | docs por hito (6) + por corrida (3) | **repo de conocimiento aparte** (gitignored en el principal) | esto es lo que crece sin límite |
+| **Histórico** (docs) | docs por hito (6) + por corrida (3) | **repo principal** (commiteado) + espejo en el repo de conocimiento | viaja con el código que documenta y se revisa en el PR; el espejo es lo que acumula entre proyectos |
 | **Memoria** (Engram) | chunks/manifest buscables | store local de Engram + export al repo de conocimiento | Engram ya aísla por defecto; solo el export `.engram/` necesita casa |
 
 ## Modelo recomendado: un repo de conocimiento de equipo
@@ -29,15 +29,18 @@ ozali-knowledge/                 (repo GitHub aparte, compartido por el equipo)
       ...
 ```
 
-El repo principal solo gana `.ai/` (cerebro) + las skills bajo `.claude/skills/`. Su `.gitignore`
-excluye `.ozali/` y `.engram/`.
+El repo principal gana `.ai/` (cerebro), las skills bajo `.claude/skills/` y `.ozali/` (config del
+equipo + docs por hito). Su `.gitignore` excluye solo el **ruido local**: `.ozali/backups/`,
+`.ozali/.session-state.json` y `.engram/`.
 
 ## Cómo lo cablea el CLI
 
-- `ozali init` → detecta/clona el repo de conocimiento (default `~/.ozali/knowledge`), añade
-  `.ozali/` y `.engram/` al `.gitignore` del repo principal, apunta el export de Engram ahí.
-- `cdk` (durante el trabajo) → escribe docs en el repo de conocimiento, no en el working tree
-  del repo principal.
+- `ozali init` → detecta/clona el repo de conocimiento (default `~/.ozali/knowledge`), añade al
+  `.gitignore` del repo principal solo el ruido local (`.ozali/backups/`,
+  `.ozali/.session-state.json`, `.engram/`) y apunta el export de Engram ahí. Si una corrida vieja
+  ignoraba `.ozali/` entero —o el agente agregó `.ozali/docs/`—, `init`/`update` retiran esas reglas.
+- `cdk` (durante el trabajo) → escribe los docs por hito en `.ozali/docs/cdk/<hito>/` del repo
+  principal; `ozali sync` los espeja al repo de conocimiento.
 - `ozali sync` → commit + push del repo de conocimiento; el equipo hace pull para compartir.
 
 ## Trazabilidad (enlace código ↔ histórico)
@@ -48,9 +51,11 @@ histórico apunta a un commit exacto.
 
 ## Opciones del enlace físico (rankeadas)
 
-1. **Gitignore + clon aparte gestionado por el CLI (RECOMENDADO).** Modelo mental simple, sin
-   dolor de submódulos. El histórico nunca pesa en el repo principal. El enlace es por SHA en el
-   header (no forzado por git) — aceptable.
+1. **Clon aparte gestionado por el CLI (RECOMENDADO).** Modelo mental simple, sin dolor de
+   submódulos. Los docs por hito se commitean en el repo principal (son texto, pesan poco y se
+   revisan en el PR); lo que nunca pesa ahí es el **acumulado entre proyectos** ni el export de
+   Engram, que viven en el repo de conocimiento. El enlace es por SHA en el header (no forzado
+   por git) — aceptable.
 2. **Worktree de una rama huérfana** (`ozali-history`) en el mismo remoto, montada en `.ozali/`
    (gitignored en main). Un solo remoto; el histórico nunca ensucia los diffs de main. El
    object-DB crece pero el checkout queda liviano. Ideal si NO quieren un segundo repo.
