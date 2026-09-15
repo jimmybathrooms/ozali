@@ -6,9 +6,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { detectEngramMcpServer, detectEngramPluginInstalled } from "../lib/detect.mjs";
 import {
   engramAssetName, pickEngramAsset, isTrustedEngramURL, checksumsURLFor, parseChecksums,
-  slimReleases, readReleasesCache, migrateClaudeModelAliases, gitTracks,
+  slimReleases, readReleasesCache, migrateClaudeModelAliases, gitTracks, findAbstractModelFrontmatters, resolveModelForLevel, setFrontmatterModel,
   toPortablePath, fromPortablePath,
 } from "../lib/util.mjs";
 
@@ -935,6 +936,260 @@ test("doctor en proyecto frontend (con Node) marca Node si es viejo", () => {
     // No podemos simular Node < 16, pero verificamos que NO diga "no aplica"
     assert.doesNotMatch(stdout, /Node ≥ 16.*no aplica/, "doctor NO muestra 'no aplica' en proyecto con Node");
     assert.match(stdout, /Node ≥ 16/, "doctor verifica Node en proyecto con package.json");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- A2: validación de `model:` en frontmatters -----------------------------
+
+test("findAbstractModelFrontmatters caza los niveles abstractos y respeta modelos reales", () => {
+  const dir = tmpProject();
+  try {
+    const mk = (rel, model) => {
+      const p = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, `---\nname: ${path.basename(rel, ".md")}\nmodel: ${model}\n---\n\n# cuerpo\n`);
+    };
+    mk(".claude/skills/cdk/SKILL.md", "medium");          // ✗ nivel abstracto
+    mk(".claude/agents/project-analyzer.md", "high");     // ✗
+    mk(".claude/agents/tester.md", "sonnet");             // ✓ alias
+    mk(".claude/agents/executioners.md", "opus");         // ✓
+    mk(".claude/agents/project-owner.md", "claude-opus-4"); // ✓ model ID
+    mk(".claude/agents/raro.md", "mi-modelo-propio");     // ✓ custom: no se toca
+    mk(".claude/agents/heredado.md", "inherit");          // ✓
+
+    // Sin frontmatter `model:` → no es un hallazgo.
+    const sinModel = path.join(dir, ".claude/agents/ozali-jarvis.md");
+    fs.writeFileSync(sinModel, "---\nname: ozali-jarvis\ndescription: x\n---\n\n# cuerpo\n");
+
+    const found = findAbstractModelFrontmatters(dir);
+    const files = found.map((f) => f.file).sort();
+    assert.deepEqual(files, [".claude/agents/project-analyzer.md", ".claude/skills/cdk/SKILL.md"]);
+    assert.equal(found.find((f) => f.file.includes("cdk")).model, "medium");
+    assert.equal(found.find((f) => f.file.includes("analyzer")).model, "high");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findAbstractModelFrontmatters ignora un `model:` que esté fuera del frontmatter", () => {
+  const dir = tmpProject();
+  try {
+    const p = path.join(dir, ".claude/agents/x.md");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    // El frontmatter está bien; la palabra aparece después, en prosa/código.
+    fs.writeFileSync(p, "---\nname: x\nmodel: opus\n---\n\nEl nivel es alto.\n\n```yaml\nmodel: high\n```\n");
+    assert.deepEqual(findAbstractModelFrontmatters(dir), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- Registro efectivo del MCP de Engram ------------------------------------
+
+test("detectEngramMcpServer reconoce el .mcp.json del plugin", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-home-"));
+  try {
+    const install = path.join(home, ".claude", "plugins", "cache", "engram", "engram", "0.1.1");
+    fs.mkdirSync(path.join(install, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(path.join(install, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "engram", version: "0.1.1" }));
+    fs.writeFileSync(path.join(install, ".mcp.json"), JSON.stringify({ mcpServers: { engram: { command: "engram", args: ["mcp", "--tools=agent"] } } }));
+    fs.writeFileSync(path.join(home, ".claude", "plugins", "installed_plugins.json"),
+      JSON.stringify({ version: 2, plugins: { "engram@engram": [{ scope: "user", installPath: install, version: "0.1.1" }] } }));
+
+    const r = detectEngramMcpServer({ home });
+    assert.equal(r.registered, true);
+    assert.match(r.source, /\.mcp\.json/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("detectEngramMcpServer detecta el plugin habilitado que no registra ningún MCP", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-home-"));
+  try {
+    // El caso real del plugin v0.1.2: plugin.json sin `mcpServers` y sin .mcp.json.
+    const install = path.join(home, ".claude", "plugins", "cache", "engram", "engram", "0.1.2");
+    fs.mkdirSync(path.join(install, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(path.join(install, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "engram", version: "0.1.2", hooks: "./hooks" }));
+    fs.writeFileSync(path.join(home, ".claude", "plugins", "installed_plugins.json"),
+      JSON.stringify({ version: 2, plugins: { "engram@engram": [{ scope: "user", installPath: install, version: "0.1.2" }] } }));
+
+    const r = detectEngramMcpServer({ home });
+    assert.equal(r.registered, false, "el plugin está habilitado pero no aporta servidor MCP");
+    assert.match(r.fix, /claude mcp add engram -s user -- engram mcp --tools=agent/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("detectEngramMcpServer acepta el registro manual en ~/.claude.json", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-home-"));
+  try {
+    const install = path.join(home, ".claude", "plugins", "cache", "engram", "engram", "0.1.2");
+    fs.mkdirSync(path.join(install, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(path.join(install, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "engram", version: "0.1.2" }));
+    fs.writeFileSync(path.join(home, ".claude", "plugins", "installed_plugins.json"),
+      JSON.stringify({ version: 2, plugins: { "engram@engram": [{ scope: "user", installPath: install, version: "0.1.2" }] } }));
+    // El workaround aplicado a mano.
+    fs.writeFileSync(path.join(home, ".claude.json"),
+      JSON.stringify({ mcpServers: { engram: { command: "engram", args: ["mcp", "--tools=agent"] } } }));
+
+    const r = detectEngramMcpServer({ home });
+    assert.equal(r.registered, true);
+    assert.match(r.source, /manual/i);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("resolveModelForLevel usa el config y cae a los defaults del contrato v6", () => {
+  const cfg = { agents: { models: { claude: { low: "haiku", medium: "sonnet", high: "claude-opus-4" } } } };
+  assert.equal(resolveModelForLevel(cfg, "high"), "claude-opus-4", "respeta el ID del config");
+  assert.equal(resolveModelForLevel(cfg, "MEDIUM"), "sonnet", "el nivel es case-insensitive");
+  assert.equal(resolveModelForLevel(null, "high"), "opus", "sin config, default claude");
+  assert.equal(resolveModelForLevel({}, "low", "opencode"), "kimi-k3", "default opencode");
+  assert.equal(resolveModelForLevel(cfg, "inexistente"), null);
+});
+
+test("setFrontmatterModel reemplaza solo el model: del frontmatter", () => {
+  const src = "---\nname: x\nmodel: high\ndescription: y\n---\n\ncuerpo\n\n```yaml\nmodel: high\n```\n";
+  const out = setFrontmatterModel(src, "opus");
+  assert.match(out, /^model: opus$/m);
+  assert.equal((out.match(/^model: high$/gm) || []).length, 1, "el `model: high` del cuerpo queda intacto");
+  assert.match(out, /name: x/);
+  assert.equal(setFrontmatterModel("sin frontmatter\n", "opus"), null);
+});
+
+test("doctor detecta el `model:` abstracto y --fix lo resuelve al modelo real", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+
+    // Un subagente generado por una versión con el bug de la v5.
+    const agente = path.join(dir, ".claude", "agents", "project-analyzer.md");
+    fs.mkdirSync(path.dirname(agente), { recursive: true });
+    fs.writeFileSync(agente, "---\nname: project-analyzer\nmodel: high\ntype: agent\n---\n\n**Cognitive Level:** High\n");
+
+    const antes = run(["doctor"], dir, true);
+    assert.match(antes.stdout, /Frontmatters/, "doctor reporta la fila");
+    assert.match(antes.stdout, /project-analyzer\.md/, "nombra el archivo culpable");
+    assert.match(antes.stdout, /high/, "muestra el nivel encontrado");
+
+    run(["doctor", "--fix", "--yes"], dir, true);
+
+    const txt = fs.readFileSync(agente, "utf8");
+    assert.match(txt, /^model: opus$/m, "high se resolvió a opus");
+    assert.doesNotMatch(txt, /^model: high$/m);
+    assert.match(txt, /\*\*Cognitive Level:\*\* High/, "el nivel sigue documentado en el cuerpo");
+    assert.match(txt, /name: project-analyzer/, "no rompe el resto del frontmatter");
+
+    // Y ya no lo reporta.
+    assert.deepEqual(findAbstractModelFrontmatters(dir), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("detectEngramPluginInstalled entiende installed_plugins.json v2 (clave `plugins`)", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-home-"));
+  try {
+    const dir = path.join(home, ".claude", "plugins");
+    fs.mkdirSync(dir, { recursive: true });
+    const write = (obj) => fs.writeFileSync(path.join(dir, "installed_plugins.json"), JSON.stringify(obj));
+
+    // Formato v2: las entradas cuelgan de `plugins`.
+    write({ version: 2, plugins: { "engram@engram": [{ scope: "user", version: "0.1.1", installPath: "/x" }] } });
+    const v2 = detectEngramPluginInstalled({ home });
+    assert.equal(v2.installed, true, "v2: lo encuentra");
+    assert.equal(v2.enabled, true, "v2: scope user ⇒ habilitado");
+
+    // Formato legado: las entradas cuelgan de la raíz.
+    write({ "engram@engram": [{ scope: "user", version: "0.1.1" }] });
+    assert.equal(detectEngramPluginInstalled({ home }).enabled, true, "legado: sigue funcionando");
+
+    // Instalado pero sin scope user.
+    write({ version: 2, plugins: { "engram@engram": [{ scope: "project", version: "0.1.1" }] } });
+    const soloProj = detectEngramPluginInstalled({ home });
+    assert.equal(soloProj.installed, true);
+    assert.equal(soloProj.enabled, false);
+
+    // Ausente.
+    write({ version: 2, plugins: {} });
+    assert.equal(detectEngramPluginInstalled({ home }).installed, false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor lee strict_tdd de .ozali/config.json antes que del markdown", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+
+    // Fuente de verdad cuya sección de testing usa la forma JSON (`"strict_tdd": true`), que el
+    // parser de markdown no reconoce — es como la deja la Fase 3.5 del bootstrap.
+    const ts = path.join(dir, ".ai", "context", "tech-stack.md");
+    fs.mkdirSync(path.dirname(ts), { recursive: true });
+    fs.writeFileSync(ts, '# Tech Stack\n\n## Testing & TDD\n\n```json\n{ "strict_tdd": true, "runner": "vitest" }\n```\n');
+
+    // La calibración canónica vive en el config.
+    const cfgPath = path.join(dir, ".ozali", "config.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.testing = { strict_tdd: true, runner: "vitest", greenCommand: "npx ng test --watch=false" };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+    const { stdout } = run(["doctor"], dir, true);
+    const linea = stdout.split("\n").find((l) => l.includes("Strict TDD calibrado"));
+    assert.ok(linea, "la fila existe");
+    assert.match(linea, /strict_tdd: true/, "toma el valor del config");
+    assert.doesNotMatch(linea, /sin calibrar/, "no lo reporta como sin calibrar");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor --fix no degrada strict_tdd cuando el markdown no lo declara en prosa", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+
+    const ts = path.join(dir, ".ai", "context", "tech-stack.md");
+    fs.mkdirSync(path.dirname(ts), { recursive: true });
+    fs.writeFileSync(ts, '# Tech Stack\n\n## Testing & TDD\n\n```json\n{ "strict_tdd": true }\n```\n');
+
+    const cfgPath = path.join(dir, ".ozali", "config.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.testing = { strict_tdd: true, runner: "vitest", greenCommand: "npx ng test --watch=false" };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+    run(["doctor", "--fix", "--yes"], dir, true);
+
+    const after = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    assert.equal(after.testing.strict_tdd, true, "la calibración NO se degrada a false");
+    assert.equal(after.testing.runner, "vitest", "el runner se conserva");
+    assert.equal(after.testing.greenCommand, "npx ng test --watch=false", "el comando verde se conserva");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor --fix deja intacto el config cuando tech-stack.md no dice nada de TDD", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    const ts = path.join(dir, ".ai", "context", "tech-stack.md");
+    fs.mkdirSync(path.dirname(ts), { recursive: true });
+    fs.writeFileSync(ts, "# Tech Stack\n\nSolo stack, nada de testing.\n");
+
+    const cfgPath = path.join(dir, ".ozali", "config.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.testing = { strict_tdd: true, runner: "vitest", greenCommand: "npm test" };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+    run(["doctor", "--fix", "--yes"], dir, true);
+    assert.equal(JSON.parse(fs.readFileSync(cfgPath, "utf8")).testing.strict_tdd, true);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

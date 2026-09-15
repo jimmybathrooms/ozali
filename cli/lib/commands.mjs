@@ -7,12 +7,14 @@ import {
   c, ok, warn, err, info, step,
   SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, pruneGitignore, GITIGNORE_OBSOLETE, gitTracks, migrateClaudeModelAliases,
+  findAbstractModelFrontmatters, resolveModelForLevel, setFrontmatterModel,
   tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
   isTrustedEngramURL, checksumsURLFor, parseChecksums, slimReleases, readReleasesCache,
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
   toPortablePath, fromPortablePath, parseSemver, compareSemver,
 } from "./util.mjs";
-import { detectAll, detectSourceOfTruth, detectWorkspace, detectReferences, findWorkspaceRootUp } from "./detect.mjs";
+import { detectAll, detectSourceOfTruth, detectWorkspace, detectReferences, findWorkspaceRootUp, detectEngramMcpServer,
+} from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
 
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
@@ -337,8 +339,9 @@ export async function init(cwd, opts) {
       info(`Engram ${c.bold(versionCheck.latest)} está disponible pero aún en cooldown de seguridad (24h). Se activará el ${new Date(new Date(versionCheck.publishedAt).getTime() + 24*60*60*1000).toLocaleDateString()}.`);
     }
     // Verificar que el plugin MCP esté realmente habilitado (no solo el binario)
-    if ((agent === "claude-code" || agent === "both") && !env.engramPlugin.enabled) {
-      warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+    if (agent === "claude-code" || agent === "both") {
+      if (!env.engramPlugin.enabled) warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+      else if (!env.engramMcp.registered) warnEngramMcpServer(env.engramMcp);
     }
     if ((agent === "opencode" || agent === "both") && !env.engramOpencode.enabled) {
       warnEngramOpencodeStatus(env.engramOpencode);
@@ -1039,6 +1042,22 @@ function persistCloudToken(token, opts) {
  * Distingue entre "no instalado" y "instalado pero deshabilitado".
  * Devuelve true si emitió warning (es decir, el plugin no está OK).
  */
+/**
+ * El plugin figura habilitado pero no aporta servidor MCP: `/plugin` se ve bien y las tools
+ * `mem_*` no existen. Se arregla registrando el servidor a mano con el mismo comando que usa la
+ * variante del plugin que sí lo trae.
+ */
+function warnEngramMcpServer(mcp) {
+  warn("Engram MCP: el plugin está habilitado pero " + c.bold("no registra ningún servidor MCP") + ".");
+  info(`  ${mcp.detail}.`);
+  info("  Por eso " + c.bold("/mcp") + " no lista engram y las tools " + c.bold("mem_*") + " no cargan,");
+  info("  aunque el binario esté en PATH y " + c.bold("/plugin") + " muestre el plugin como Enabled.");
+  info("  → Regístralo a mano (scope user, disponible en todos tus proyectos):");
+  info(`     ${c.bold(mcp.fix)}`);
+  info("  → Verifica con " + c.bold("claude mcp list") + " (debe decir engram: Connected) y reinicia Claude Code.");
+  return true;
+}
+
 function warnEngramPluginStatus(plugin, label = "Claude Code") {
   if (!plugin.installed) {
     warn(`Engram MCP: el plugin engram@engram NO está instalado en ${label}.`);
@@ -1619,6 +1638,26 @@ export async function doctor(cwd, opts = {}) {
       : `contrato v${cdkInfo.version} < v${cdkN} → migra con la skill 'ozali'`;
     add("Skill cdk", false, reason);
   }
+  // Frontmatters `model:` — el contrato cdk v6 exige el modelo real, no el nivel abstracto.
+  // Es un fallo SILENCIOSO hasta que alguien invoca la skill o el subagente, así que se chequea acá.
+  const badModels = findAbstractModelFrontmatters(cwd);
+  add("Frontmatters `model:`", badModels.length === 0,
+    badModels.length === 0
+      ? "sin niveles abstractos"
+      : `${badModels.length} con nivel abstracto: ${badModels.map((b) => `${b.file} (${b.model})`).join(", ")}`);
+  if (badModels.length) {
+    warn("Hay frontmatters con un nivel cognitivo en vez del modelo real.");
+    info("  Claude Code lee " + c.bold("model:") + " literal: solo acepta haiku/sonnet/opus/inherit o un model ID.");
+    info("  Con un nivel ahí, la skill o el subagente fallan al invocarse:");
+    info("  " + c.dim("There's an issue with the selected model (high). It may not exist…"));
+    for (const b of badModels) {
+      const runtime = b.file.startsWith(".opencode/") ? "opencode" : "claude";
+      const real = resolveModelForLevel(cfg, b.model, runtime);
+      info(`  → ${c.bold(b.file)}: model: ${b.model} → ${c.green(real || "?")}`);
+    }
+    info("  Corrígelo con " + c.bold("ozali doctor --fix") + " o regenerando con la skill " + c.bold("ozali") + ".");
+  }
+
   add("Engram", env.engram.available, env.engram.available ? env.engram.bin : "no instalado → modo docs");
   if (env.engram.available) {
     const online = tryExec("engram", ["doctor"], { cwd }) !== null;
@@ -1629,6 +1668,12 @@ export async function doctor(cwd, opts = {}) {
       add("Engram MCP plugin", env.engramPlugin.enabled, env.engramPlugin.enabled ? env.engramPlugin.detail : env.engramPlugin.detail);
       if (!env.engramPlugin.enabled) {
         warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+      } else {
+        // El plugin "enabled" NO garantiza que el MCP se levante: hubo versiones publicadas sin
+        // `mcpServers` ni `.mcp.json`, con lo que las tools mem_* nunca cargaban.
+        const mcp = env.engramMcp;
+        add("Engram MCP servidor", mcp.registered, mcp.registered ? `${mcp.detail} [${mcp.source}]` : mcp.detail);
+        if (!mcp.registered) warnEngramMcpServer(mcp);
       }
     }
     if (agent === "opencode" || agent === "both") {
@@ -1657,7 +1702,8 @@ export async function doctor(cwd, opts = {}) {
 
   // Strict TDD (de la fuente de verdad)
   const tdd = readStrictTdd(cwd, env.sot);
-  add("Strict TDD calibrado", tdd.found, tdd.found ? `strict_tdd: ${tdd.value}` : "sin calibrar (Fase 3.5 del bootstrap)");
+  add("Strict TDD calibrado", tdd.found,
+    tdd.found ? `strict_tdd: ${tdd.value}${tdd.source ? ` (${tdd.source})` : ""}` : "sin calibrar (Fase 3.5 del bootstrap)");
 
   // Testing signals
   add("Runner de pruebas", env.testing.runners.length > 0, env.testing.runners.join(", ") || "ninguno detectado");
@@ -1743,6 +1789,33 @@ export async function doctor(cwd, opts = {}) {
       if (sync.synced) {
         info(`Sincronizado testing desde ${path.relative(cwd, path.join(env.sot.dir, "context", "tech-stack.md"))}: strict_tdd=${sync.strict_tdd}, runner=${sync.runner || "N/A"}, greenCommand=${sync.greenCommand || "N/A"}.`);
       }
+    }
+
+    // Fix 5: frontmatters con nivel abstracto en `model:` (contrato cdk v6).
+    // Es un reemplazo determinista —el propio valor ES el nivel—, así que no hace falta
+    // consultar el mapping rol→nivel: `model: high` resuelve a agents.models.<runtime>.high.
+    const modelsRow = rows.find((r) => r.label === "Frontmatters `model:`");
+    if (modelsRow && !modelsRow.good) {
+      const cfgNow = readMergedConfig(cwd);
+      const fixed = [];
+      for (const b of findAbstractModelFrontmatters(cwd)) {
+        const runtime = b.file.startsWith(".opencode/") ? "opencode" : "claude";
+        const real = resolveModelForLevel(cfgNow, b.model, runtime);
+        if (!real) { warn(`No pude resolver un modelo para el nivel "${b.model}" en ${b.file}.`); continue; }
+        const abs = path.join(cwd, b.file);
+        const out = setFrontmatterModel(fs.readFileSync(abs, "utf8"), real);
+        if (!out) { warn(`No pude reescribir el frontmatter de ${b.file}.`); continue; }
+        fs.writeFileSync(abs, out);
+        fixed.push(`${b.file}: ${b.model} → ${real}`);
+      }
+      if (fixed.length) {
+        ok(`Frontmatters corregidos (${fixed.length}):`);
+        for (const f of fixed) info("  " + f);
+        info("  El nivel cognitivo sigue documentado en el cuerpo de cada archivo.");
+      }
+      const left = findAbstractModelFrontmatters(cwd);
+      modelsRow.good = left.length === 0;
+      modelsRow.detail = left.length === 0 ? "sin niveles abstractos" : `${left.length} sin corregir`;
     }
 
     const badAfterFix = rows.filter((r) => !r.good).length;
@@ -1864,11 +1937,20 @@ function detectConfigStale(cwd) {
 }
 
 function readStrictTdd(cwd, sot) {
+  // Orden de fuentes del contrato cdk v1: `.ozali/config.json` → `testing` manda. La Fase 3.5 del
+  // bootstrap escribe ahí la calibración, y en el markdown suele quedar como bloque JSON
+  // (`"strict_tdd": true`), que el parser de prosa de abajo no reconoce — leer solo el markdown
+  // reportaba "sin calibrar" un repo perfectamente calibrado.
+  const cfg = readMergedConfig(cwd);
+  if (cfg && cfg.testing && typeof cfg.testing.strict_tdd === "boolean") {
+    return { found: true, value: String(cfg.testing.strict_tdd), source: "config" };
+  }
   const f = path.join(cwd, sot.dir, "context", "tech-stack.md");
   if (!exists(f)) return { found: false };
   const txt = fs.readFileSync(f, "utf8");
-  const m = txt.match(/Strict\s*TDD[:*\s]+(true|false)/i);
-  return m ? { found: true, value: m[1].toLowerCase() } : { found: false };
+  // Acepta tanto la prosa ("Strict TDD: true") como la clave JSON ("strict_tdd": true).
+  const m = txt.match(/Strict[\s_]*TDD["']?\s*[:*\s]+\s*(true|false)/i);
+  return m ? { found: true, value: m[1].toLowerCase(), source: "tech-stack.md" } : { found: false };
 }
 
 /** Lee `.ai/context/tech-stack.md` y sincroniza `.ozali/config.json` → `testing`.
@@ -1878,8 +1960,9 @@ function syncTestingFromTechStack(cwd, sot) {
   const f = path.join(cwd, sot.dir, "context", "tech-stack.md");
   if (!exists(f)) return { synced: false };
   const txt = fs.readFileSync(f, "utf8");
-  const strictMatch = txt.match(/Strict\s*TDD[:*\s]+(true|false)/i);
-  const strictTdd = strictMatch ? strictMatch[1].toLowerCase() === "true" : false;
+  // Acepta la prosa ("Strict TDD: true") y la clave JSON ("strict_tdd": true) que deja la Fase 3.5.
+  const strictMatch = txt.match(/Strict[\s_]*TDD["']?\s*[:*\s]+\s*(true|false)/i);
+  const strictTdd = strictMatch ? strictMatch[1].toLowerCase() === "true" : null;
 
   // Buscar "Comando verde" en el markdown (puede estar en negrita, backticks, etc.)
   const cmdMatch = txt.match(/Comando\s+verde[^:]*:\s*[`\*]*([^`\n\*]+)/i);
@@ -1896,13 +1979,17 @@ function syncTestingFromTechStack(cwd, sot) {
     }
   }
 
+  // Si el markdown no declara nada, no hay nada que sincronizar. Escribir igual degradaba la
+  // calibración del config a `strict_tdd: false` por un parseo fallido — un valor que nadie pidió.
+  if (strictTdd === null && !runner && !greenCommand) return { synced: false };
+
   const cfg = readJSON(CONFIG_PATH(cwd)) || {};
   if (!cfg.testing) cfg.testing = defaultTestingConfig();
-  cfg.testing.strict_tdd = strictTdd;
+  if (strictTdd !== null) cfg.testing.strict_tdd = strictTdd;
   if (runner) cfg.testing.runner = runner;
   if (greenCommand) cfg.testing.greenCommand = greenCommand;
   writeJSON(CONFIG_PATH(cwd), normalizeConfig(cfg, cwd));
-  return { synced: true, strict_tdd: strictTdd, runner, greenCommand };
+  return { synced: true, strict_tdd: cfg.testing.strict_tdd, runner, greenCommand };
 }
 
 // ---- seguridad: semver guard + backup + frozen --------------------------------
@@ -2162,8 +2249,9 @@ export async function update(cwd, opts = {}) {
       info(`Engram ${c.bold(versionCheck.latest)} está disponible pero aún en cooldown de seguridad (24h). Se activará el ${new Date(new Date(versionCheck.publishedAt).getTime() + 24*60*60*1000).toLocaleDateString()}.`);
     }
     // Verificar estado real del plugin MCP (no solo el binario)
-    if ((agent === "claude-code" || agent === "both") && !env.engramPlugin.enabled) {
-      warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+    if (agent === "claude-code" || agent === "both") {
+      if (!env.engramPlugin.enabled) warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+      else if (!env.engramMcp.registered) warnEngramMcpServer(env.engramMcp);
     }
     if ((agent === "opencode" || agent === "both") && !env.engramOpencode.enabled) {
       warnEngramOpencodeStatus(env.engramOpencode);
@@ -2441,9 +2529,17 @@ export async function installEngramCmd(cwd, opts) {
     spawnCmd("engram", ["setup", "opencode"]);
   }
 
-  // Verificar que el plugin MCP esté habilitado (no solo el binario y el marketplace)
-  if ((agent === "claude-code" || agent === "both") && !env.engramPlugin.enabled) {
-    warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+  // Verificar que el plugin MCP esté habilitado (no solo el binario y el marketplace) y —lo que
+  // no es lo mismo— que ALGO registre realmente el servidor. `env` se capturó antes de correr
+  // `engram setup`, así que el registro se vuelve a detectar acá para no leer estado viejo.
+  if (agent === "claude-code" || agent === "both") {
+    if (!env.engramPlugin.enabled) {
+      warnEngramPluginStatus(env.engramPlugin, "Claude Code");
+    } else {
+      const mcp = detectEngramMcpServer();
+      if (mcp.registered) ok(`Engram MCP registrado: ${mcp.detail} [${mcp.source}].`);
+      else warnEngramMcpServer(mcp);
+    }
   }
   if ((agent === "opencode" || agent === "both") && !env.engramOpencode.enabled) {
     warnEngramOpencodeStatus(env.engramOpencode);

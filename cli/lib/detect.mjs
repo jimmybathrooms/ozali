@@ -69,20 +69,31 @@ export function detectEngram() {
   return { available: !!bin, bin: bin || null };
 }
 
+/** Entradas de `engram@engram` en installed_plugins.json, tolerando el formato v2 y el legado. */
+function engramPluginEntries(data) {
+  if (!data || typeof data !== "object") return null;
+  const fromV2 = data.plugins && data.plugins["engram@engram"];
+  const fromLegacy = data["engram@engram"];
+  const entries = Array.isArray(fromV2) ? fromV2 : fromLegacy;
+  return Array.isArray(entries) ? entries : null;
+}
+
 /**
  * Verifica si el plugin engram@engram está instalado y HABILITADO a nivel usuario
  * en Claude Code (~/.claude/plugins/installed_plugins.json).
  * El binario puede estar en PATH y el .mcp.json clonado en marketplaces, pero si
  * el plugin no figura con scope:user, Claude Code NO levanta el servidor MCP.
  */
-export function detectEngramPluginInstalled() {
-  const installedPath = path.join(HOME, ".claude", "plugins", "installed_plugins.json");
+export function detectEngramPluginInstalled({ home = HOME } = {}) {
+  const installedPath = path.join(home, ".claude", "plugins", "installed_plugins.json");
   if (!exists(installedPath)) {
     return { installed: false, enabled: false, path: installedPath, detail: "no existe installed_plugins.json" };
   }
   try {
     const data = JSON.parse(fs.readFileSync(installedPath, "utf8"));
-    const entries = data["engram@engram"];
+    // El archivo tiene dos formatos: el legado pone las entradas en la raíz y el v2 las cuelga de
+    // `plugins`. Leer solo la raíz daba un falso "no registrado" en instalaciones v2.
+    const entries = engramPluginEntries(data);
     if (!Array.isArray(entries) || entries.length === 0) {
       return { installed: false, enabled: false, path: installedPath, detail: "plugin engram@engram no registrado" };
     }
@@ -104,6 +115,64 @@ export function detectEngramPluginInstalled() {
   } catch {
     return { installed: false, enabled: false, path: installedPath, detail: "error leyendo installed_plugins.json" };
   }
+}
+
+/**
+ * ¿Claude Code termina levantando REALMENTE el servidor MCP de Engram?
+ *
+ * Que el plugin figure "enabled" no alcanza: el servidor se registra por el `.mcp.json` de la raíz
+ * del plugin (auto-descubierto) o por la clave `mcpServers` de su `plugin.json`. Hubo versiones
+ * del plugin para Claude Code publicadas **sin ninguno de los dos** —la variante para Codex del
+ * mismo repo sí lo traía—, así que `/plugin` mostraba el plugin habilitado y las tools `mem_*`
+ * nunca cargaban. Este check mira el registro efectivo, no el estado declarado.
+ *
+ * Acepta `home` para poder testearlo sin tocar el HOME real.
+ * Devuelve { registered, source, detail, fix, pluginVersion }.
+ */
+export function detectEngramMcpServer({ home = HOME } = {}) {
+  const FIX = "claude mcp add engram -s user -- engram mcp --tools=agent";
+  const out = (registered, source, detail, pluginVersion = null) =>
+    ({ registered, source, detail, fix: FIX, pluginVersion });
+
+  // 1) El plugin instalado a nivel usuario: ¿aporta servidor?
+  let installPath = null, pluginVersion = null;
+  const installedPath = path.join(home, ".claude", "plugins", "installed_plugins.json");
+  const installed = readJSON(installedPath);
+  if (installed) {
+    const entries = engramPluginEntries(installed);
+    const userEntry = entries ? entries.find((e) => e && e.scope === "user") : null;
+    if (userEntry) {
+      installPath = userEntry.installPath || null;
+      pluginVersion = userEntry.version || null;
+    }
+  }
+  if (installPath && exists(installPath)) {
+    const mcpJson = readJSON(path.join(installPath, ".mcp.json"));
+    if (mcpJson && mcpJson.mcpServers && mcpJson.mcpServers.engram) {
+      return out(true, "plugin (.mcp.json)", `el plugin v${pluginVersion || "?"} registra el MCP por su .mcp.json`, pluginVersion);
+    }
+    const manifest = readJSON(path.join(installPath, ".claude-plugin", "plugin.json"));
+    if (manifest && manifest.mcpServers) {
+      return out(true, "plugin (plugin.json)", `el plugin v${pluginVersion || "?"} declara mcpServers en su plugin.json`, pluginVersion);
+    }
+  }
+
+  // 2) Registro manual del usuario (el workaround de `claude mcp add`).
+  const userCfg = readJSON(path.join(home, ".claude.json"));
+  if (userCfg && userCfg.mcpServers && userCfg.mcpServers.engram) {
+    return out(true, "registro manual (~/.claude.json)", "el servidor está registrado a mano con scope user", pluginVersion);
+  }
+
+  if (!installPath) {
+    return out(false, null, "el plugin engram@engram no está instalado con scope user", pluginVersion);
+  }
+  return out(
+    false,
+    null,
+    `el plugin v${pluginVersion || "?"} está habilitado pero no registra ningún servidor MCP ` +
+      "(su plugin.json no trae mcpServers y no hay .mcp.json en la raíz)",
+    pluginVersion,
+  );
 }
 
 /**
@@ -254,6 +323,7 @@ export function detectAll(cwd) {
     ozaliCommit: detectInstalledOzaliCommit(cwd),
     engram: detectEngram(),
     engramPlugin: detectEngramPluginInstalled(),
+    engramMcp: detectEngramMcpServer(),
     engramOpencode: detectEngramOpencode(cwd),
     obsidian: detectObsidian(),
     cloud: detectCloud(cwd),

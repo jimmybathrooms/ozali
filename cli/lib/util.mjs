@@ -339,6 +339,88 @@ export function pruneGitignore(cwd, entries) {
   return { removed };
 }
 
+// ---- validación de `model:` en frontmatters ---------------------------------
+
+/**
+ * Niveles cognitivos de diseño. Son clasificación interna de `ozali`, NO modelos: Claude Code lee
+ * `model:` de forma literal y falla con "There's an issue with the selected model (high)".
+ * El contrato cdk v6 exige que el frontmatter lleve el modelo ya resuelto.
+ */
+export const ABSTRACT_MODEL_LEVELS = ["low", "medium", "high"];
+
+/** Extrae el valor de `model:` del frontmatter YAML (solo del bloque `---` inicial). */
+export function frontmatterModel(text) {
+  if (!text.startsWith("---")) return null;
+  const end = text.indexOf("\n---", 3);
+  if (end === -1) return null;
+  const block = text.slice(0, end);
+  const m = block.match(/^model:[ \t]*(.+?)[ \t]*$/m);
+  if (!m) return null;
+  return m[1].replace(/^["']|["']$/g, "").trim() || null;
+}
+
+/**
+ * Busca skills y subagentes cuyo frontmatter `model:` tenga un **nivel abstracto** en vez del
+ * modelo real. Solo reporta esos tres valores: un modelo custom (`kimi-k3`, `mi-modelo-propio`)
+ * es legítimo y no se toca, así que el check no tiene falsos positivos.
+ * Devuelve [{ file, model }] con rutas relativas a `cwd`.
+ */
+export function findAbstractModelFrontmatters(cwd) {
+  const out = [];
+  const files = [];
+  const addDir = (rel, filter) => {
+    const dir = path.join(cwd, rel);
+    if (!exists(dir)) return;
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (filter === "agents" && e.isFile() && e.name.endsWith(".md")) files.push(path.join(rel, e.name));
+      if (filter === "skills" && e.isDirectory() && exists(path.join(dir, e.name, "SKILL.md"))) {
+        files.push(path.join(rel, e.name, "SKILL.md"));
+      }
+    }
+  };
+  addDir(path.join(".claude", "agents"), "agents");
+  addDir(path.join(".claude", "skills"), "skills");
+  addDir(path.join(".opencode", "skills"), "skills");
+
+  for (const rel of files) {
+    let txt;
+    try { txt = fs.readFileSync(path.join(cwd, rel), "utf8"); } catch { continue; }
+    const model = frontmatterModel(txt);
+    if (model && ABSTRACT_MODEL_LEVELS.includes(model.toLowerCase())) {
+      out.push({ file: rel.split(path.sep).join("/"), model });
+    }
+  }
+  return out;
+}
+
+/** Defaults de modelo por nivel cuando `.ozali/config.json` no trae `agents.models`. */
+export const DEFAULT_LEVEL_MODELS = {
+  claude: { low: "haiku", medium: "sonnet", high: "opus" },
+  opencode: { low: "kimi-k3", medium: "deepseek-v4-pro", high: "mimo-v2.5" },
+};
+
+/**
+ * Resuelve un nivel cognitivo al modelo real que debe ir en el frontmatter (contrato cdk v6).
+ * `runtime` es "claude" u "opencode". Cae a los defaults si el config no define el nivel.
+ */
+export function resolveModelForLevel(cfg, level, runtime = "claude") {
+  const lvl = String(level || "").toLowerCase();
+  const fallback = DEFAULT_LEVEL_MODELS[runtime] || DEFAULT_LEVEL_MODELS.claude;
+  const fromCfg = cfg && cfg.agents && cfg.agents.models && cfg.agents.models[runtime];
+  const value = fromCfg && fromCfg[lvl];
+  return (typeof value === "string" && value.trim()) ? value.trim() : (fallback[lvl] || null);
+}
+
+/** Reescribe el `model:` del frontmatter. Devuelve el texto nuevo (o null si no había frontmatter). */
+export function setFrontmatterModel(text, model) {
+  if (!text.startsWith("---")) return null;
+  const end = text.indexOf("\n---", 3);
+  if (end === -1) return null;
+  const head = text.slice(0, end);
+  if (!/^model:[ \t]*.+$/m.test(head)) return null;
+  return head.replace(/^model:[ \t]*.+$/m, `model: ${model}`) + text.slice(end);
+}
+
 // ---- modelos de agentes -----------------------------------------------------
 
 /**

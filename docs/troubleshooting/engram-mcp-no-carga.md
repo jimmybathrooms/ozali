@@ -75,6 +75,57 @@ Alternativa por comandos (si el plugin no estuviera ni añadido):
 
 ---
 
+## Segunda causa: el plugin está habilitado pero **no registra ningún servidor MCP**
+
+Caso detectado el 2026-09-15, distinto del anterior aunque el síntoma se vea igual. Acá el plugin
+`engram@engram` sí figuraba **Enabled** en `/plugin` y el binario respondía (`engram` v1.20.0),
+pero `/mcp` seguía sin listar engram y las tools `mem_*` no cargaban.
+
+**Causa raíz:** Claude Code levanta el servidor MCP de un plugin por **una de dos vías**:
+
+1. un `.mcp.json` en la **raíz** del plugin instalado (auto-descubierto), o
+2. la clave `"mcpServers"` dentro de su `.claude-plugin/plugin.json`.
+
+La versión del plugin para **Claude Code** publicada en ese momento (v0.1.2) **no traía ninguna de
+las dos** — mientras que la variante para **Codex del mismo repo** (v0.1.4) sí declaraba
+`"mcpServers": "./.mcp.json"` apuntando a `engram mcp --tools=agent`. O sea: un gap del plugin en
+esa versión, no un error de configuración del usuario.
+
+> Ojo con el diagnóstico: `installed_plugins.json` mostraba `scope: user` correctamente, así que
+> el check de la **primera** causa pasaba en verde. "Habilitado" y "aporta servidor MCP" son cosas
+> distintas.
+
+### Cómo se resuelve
+
+Registrar el servidor a mano con el mismo comando que usa la variante que sí lo trae:
+
+```bash
+claude mcp add engram -s user -- engram mcp --tools=agent
+claude mcp list          # debe decir  engram: ✓ Connected
+# reiniciar Claude Code (o abrir sesión nueva) para que cargue las tools mem_*
+```
+
+Se usa `-s user` para que quede disponible en todos los proyectos, igual que el plugin.
+
+### Verificación manual
+
+```bash
+# ¿el plugin instalado aporta servidor?
+cat ~/.claude/plugins/cache/engram/engram/*/.mcp.json 2>/dev/null
+# ¿o lo declara su manifiesto?
+grep -l mcpServers ~/.claude/plugins/cache/engram/engram/*/.claude-plugin/plugin.json 2>/dev/null
+# ¿o está registrado a mano?
+claude mcp list | grep engram
+```
+
+Si las tres salen vacías, estás en este caso.
+
+> Vale la pena reportarlo aguas arriba (`Gentleman-Programming/engram`, falta `mcpServers` en
+> `plugin/claude-code/.claude-plugin/plugin.json`) para que la próxima versión lo traiga de fábrica
+> y el workaround deje de hacer falta.
+
+---
+
 ## Qué hace ozali ahora (desde v0.15.x)
 
 Las propuestas originales ya están implementadas en el CLI:
@@ -93,6 +144,14 @@ Las propuestas originales ya están implementadas en el CLI:
 4. **Post-instalación recordatoria.** Tras `ozali init` o `ozali install-engram`, si el plugin
    aún no está habilitado, se imprime la advertencia para que el usuario lo active antes de
    reiniciar Claude Code.
+5. **Check del registro efectivo del MCP** (por la *segunda causa* de arriba).
+   `detectEngramMcpServer()` no se queda en "el plugin está habilitado": comprueba que **algo**
+   registre de verdad el servidor —el `.mcp.json` de la raíz del plugin, el `mcpServers` de su
+   `plugin.json`, o un registro manual en `~/.claude.json`—. Si ninguno aparece, `ozali doctor`
+   marca ✖ en **`Engram MCP servidor`** e imprime el comando exacto
+   (`claude mcp add engram -s user -- engram mcp --tools=agent`). El mismo aviso sale al final de
+   `ozali init` y de `ozali install-engram`, este último **re-detectando** después de correr
+   `engram setup` para no leer estado viejo.
 
 ---
 

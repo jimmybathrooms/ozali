@@ -79,7 +79,7 @@ git clone <repo> && node ozali/cli/bin/ozali.mjs init
 ozali init           # detecta agente, instala skills ozali + ozali-commit, aísla histórico, configura Engram
 ozali install-skills # instala skills globales cuando el repo ya está calibrado y solo faltan las skills
 ozali workspace      # multi-repo: escanea la carpeta raíz, remedia init/calibración y cablea la config conjunta
-ozali doctor         # health-check read-only (fuente de verdad, Engram, Cloud, versión de cdk, Strict TDD…)
+ozali doctor         # health-check read-only (fuente de verdad, Engram, Cloud, versión de cdk, Strict TDD, frontmatters model:…)
 ozali update         # actualiza skills + permisos; avisa si cdk quedó atrás; detecta Engram y skills globales
 ozali sync           # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
 ozali audit          # navega/audita la memoria de Engram del proyecto (o general)
@@ -172,9 +172,13 @@ instalarlo, pasa `--no-engram` (arranca en modo `docs`). Más tarde puedes insta
 (réplica de equipo opt-in) además del git-sync.
 
 > **Gotcha conocido (Engram MCP):** a veces el binario `engram` está en PATH y el marketplace está
-> añadido, pero el plugin `engram@engram` no aparece en `/mcp`. Eso ocurre cuando el plugin está
-> **deshabilitado** en Claude Code (`/plugin`). `ozali doctor` lo detecta y avisa; la solución rápida
-> está en [`docs/troubleshooting/engram-mcp-no-carga.md`](docs/troubleshooting/engram-mcp-no-carga.md).
+> añadido, pero el plugin `engram@engram` no aparece en `/mcp`. Hay **dos causas distintas** con el
+> mismo síntoma: (1) el plugin está **deshabilitado** en Claude Code (`/plugin`), o (2) el plugin
+> está habilitado pero **no registra ningún servidor MCP** —hubo versiones publicadas sin
+> `mcpServers` ni `.mcp.json`—, que se arregla con
+> `claude mcp add engram -s user -- engram mcp --tools=agent`. `ozali doctor` distingue las dos
+> (filas **`Engram MCP plugin`** y **`Engram MCP servidor`**) y da el paso exacto; el detalle está en
+> [`docs/troubleshooting/engram-mcp-no-carga.md`](docs/troubleshooting/engram-mcp-no-carga.md).
 
 `init` también crea **ozali-jarvis**, un **orquestador always-on**: persona en `CLAUDE.md`/`AGENTS.md`
 + subagente + hooks de recordatorio que hace que el agente, **en toda sesión y sin necesidad de
