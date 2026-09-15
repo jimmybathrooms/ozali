@@ -1,5 +1,5 @@
 // smoke.test.mjs — pruebas básicas del CLI (node:test, sin dependencias).
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -17,9 +17,36 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.resolve(HERE, "..", "bin", "ozali.mjs");
 const PKG_ROOT = path.resolve(HERE, "..", "..");
 
+// ---- aislamiento de HOME ----------------------------------------------------
+// El CLI resuelve varias rutas contra el HOME del usuario (skills globales,
+// ~/.ozali/cache, ~/.claude/plugins). Sin aislarlo, correr el suite SOBREESCRIBE la
+// instalación global del desarrollador: `update` recorre `env.skill.paths`, que
+// incluye ~/.claude/skills/ozali cuando existe, y le copia el working tree encima
+// (con el backup cayendo en el tmp del test, que se borra después).
+// CI nunca lo vio porque un runner limpio no tiene instalación global.
+//
+// Se inyecta acá, en `run()`, y no en `tmpProject()`, para cubrir también los tests
+// de `workspace`, que crean su raíz inline sin pasar por ese helper.
+const tmpHomes = new Map();
+
+/** HOME temporal estable por cwd: dos `run()` del mismo test comparten estado. */
+function homeFor(cwd) {
+  const key = cwd || "__sin_cwd__";
+  if (!tmpHomes.has(key)) tmpHomes.set(key, fs.mkdtempSync(path.join(os.tmpdir(), "ozali-home-")));
+  return tmpHomes.get(key);
+}
+
+after(() => {
+  for (const h of tmpHomes.values()) fs.rmSync(h, { recursive: true, force: true });
+  tmpHomes.clear();
+});
+
 function run(args, cwd, expectFail = false) {
+  const home = homeFor(cwd);
+  // USERPROFILE además de HOME: os.homedir() usa ese en Windows.
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = execFileSync(process.execPath, [BIN, ...args], { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     return { code: 0, stdout };
   } catch (e) {
     if (!expectFail) throw e;
@@ -1190,6 +1217,32 @@ test("doctor --fix deja intacto el config cuando tech-stack.md no dice nada de T
 
     run(["doctor", "--fix", "--yes"], dir, true);
     assert.equal(JSON.parse(fs.readFileSync(cfgPath, "utf8")).testing.strict_tdd, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("el suite no toca el HOME real: `update` refresca la skill global DENTRO del HOME temporal", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+
+    // Instalación "global" simulada, dentro del HOME aislado de este test. `update` recorre
+    // env.skill.paths, que la incluye, así que debe escribir ACÁ y no en el HOME del usuario.
+    const home = homeFor(dir);
+    const globalSkill = path.join(home, ".claude", "skills", "ozali");
+    fs.mkdirSync(globalSkill, { recursive: true });
+    fs.writeFileSync(path.join(globalSkill, "SKILL.md"), "---\nname: ozali\n---\n\nCONTENIDO VIEJO\n");
+
+    run(["update"], dir);
+
+    const txt = fs.readFileSync(path.join(globalSkill, "SKILL.md"), "utf8");
+    assert.doesNotMatch(txt, /CONTENIDO VIEJO/, "update refrescó la skill global del HOME temporal");
+    assert.match(txt, /name: ozali/, "y quedó una skill válida");
+
+    // Si alguien quita la inyección de HOME en run(), el CLI escribiría en el HOME real y
+    // el archivo de arriba seguiría diciendo CONTENIDO VIEJO → este test se pone rojo.
+    assert.notEqual(home, os.homedir(), "el HOME del subproceso no puede ser el del desarrollador");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
