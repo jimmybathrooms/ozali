@@ -65,7 +65,12 @@ ecosistema del equipo ya usa esa variante).
     bugfix.md    → proceso para corrección no crítica
     hotfix.md    → proceso express para incidente de producción (gate humano intacto)
     refactor.md  → proceso para mejora interna sin cambio de comportamiento
+  business/      → (opcional, Fase 2.5) reglas de negocio: dominio, reglas, validaciones,
+                   políticas, glosario y flujos del dominio — ver business-blueprint.md
 ```
+
+`business/` **no** se genera en la Fase 2: la extrae la Fase 2.5 (pregunta si falta, o
+`ozali --business`) con las reglas de [`business-blueprint.md`](business-blueprint.md).
 
 ---
 
@@ -93,6 +98,7 @@ Para detalles sobre el comportamiento de la IA en este proyecto, consulta:
 | **[Arquitectura](.ai/context/architecture.md)** | <resumen de una línea> |
 | **[Stack Tecnológico](.ai/context/tech-stack.md)** | <resumen> |
 | **[Estándares de Código](.ai/context/coding-standards.md)** | <resumen> |
+| **[Reglas de Negocio](.ai/business/README.md)** | <resumen> — solo si existe `business/` |
 | **[Log de Conocimiento](.ai/knowledge/learning-notes.md)** | Memoria técnica de la IA. |
 
 ## ⚙️ Workflow & Comandos
@@ -122,6 +128,7 @@ Para detalles sobre el comportamiento de la IA en este proyecto, consulta:
 | `tech-stack.md` | framework UI + Node + tooling (versiones de `package.json`), comandos `npm ...` | lenguaje + framework + BD (versiones de `pom.xml`/etc.), comandos `mvn ...`/wrapper |
 | `coding-standards.md` | reactividad, manejo de estado, i18n, accesibilidad, testing (Karma/Jest/Cypress) | inyección por constructor, DTO vs Entity, wrapper de respuesta, manejo de excepciones, transaccionalidad, testing (JUnit/mocks) |
 | Comandos típicos | `npm start`, `npm run build`, `npm run test`, deploy (Firebase/CDN) | `mvn spring-boot:run`, `mvn test`, `mvn package`, perfiles por entorno |
+| `business/` (Fase 2.5) | validadores de formulario, guards, interceptores, reglas de visualización por rol/estado | Forms/DTOs con Bean Validation, enums de estado, condicionales y cálculos en services, exception handlers |
 | Zonas sensibles típicas | guards/auth, interceptores, modelos compartidos, config de entornos | config de datasource, clientes externos, exception handlers, DTOs de contrato público, ymls de uat/producción |
 
 Los `workflows/` son comunes en estructura (feature/bugfix/hotfix/refactor) pero sus pasos

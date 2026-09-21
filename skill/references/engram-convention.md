@@ -102,6 +102,7 @@ Para artefactos a nivel de proyecto (no de hito): `cdk/_project/{artifact-type}`
 | `03-resumen-tecnico.md` | `resumen-tecnico` | al cierre | `mem_save` |
 | (estado del orchestrator) | `state` | tras cada transición de fase | `mem_update` (upsert) |
 | calibración (Fase 3.5 de ozali) | `_project/testing-capabilities` | en el bootstrap | `mem_save` |
+| reglas de negocio (Fase 2.5 / `--business`) | `_project/business-rules` | tras el GATE de la extracción | `mem_update` (upsert): commit base + conteos + `PROVISIONAL` abiertos |
 
 > `04-resumen-usuario.md` y `06-uso-tokens.md` se quedan como **docs legibles** (no necesitan
 > espejo buscable); opcional mirror si el equipo lo quiere.

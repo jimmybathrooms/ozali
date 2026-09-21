@@ -13,14 +13,14 @@ herramientas acotadas y un contrato de entrada/salida.
 
 | Rol                  | Decide | Produce | Lee de la fuente de verdad | Categoría cognitiva | Nivel modelo |
 |----------------------|--------|---------|----------------------------|---------------------|--------------|
-| project-owner        | Qué se puede/no tocar; criterios de aceptación | Veredicto de alcance | `AI.md`, módulos de negocio | **A — Análisis Profundo** | **High** |
+| project-owner        | Qué se puede/no tocar; criterios de aceptación | Veredicto de alcance | `AI.md`, `.ai/business/{policies,rules}.md` | **A — Análisis Profundo** | **High** |
 | project-manager      | Descomposición y orden de tareas | Backlog de tareas con estados | `.ai/workflows/*` | **E — Lectura/Propuesta** | **Medium** |
-| project-analyzer     | Impacto y riesgos del cambio | **Doc 1**: análisis + hitos | `.ai/context/architecture.md` | **A — Análisis Profundo** | **High** |
+| project-analyzer     | Impacto y riesgos del cambio | **Doc 1**: análisis + hitos | `.ai/context/architecture.md`, `.ai/business/*` | **A — Análisis Profundo** | **High** |
 | project-orchestrator | Quién ejecuta y en qué orden | Resultados integrados | todo el `.ai/` | **B — Orquestación** | **Medium** |
-| executioners         | Cómo se implementa | Código + diffs | `.ai/context/coding-standards.md` | **C — Escritura Código** | **High** |
-| project-proposer     | Alternativas y mejoras | **Doc 3**: mejoras con relevancia | `.ai/knowledge/*` | **E — Lectura/Propuesta** | **Medium** |
+| executioners         | Cómo se implementa | Código + diffs | `.ai/context/coding-standards.md`, `.ai/business/validation-map.md` | **C — Escritura Código** | **High** |
+| project-proposer     | Alternativas y mejoras | **Doc 3**: mejoras con relevancia | `.ai/knowledge/*`, `PROVISIONAL` de `business/` | **E — Lectura/Propuesta** | **Medium** |
 | project-documenter   | Forma/registro de la salida | **Docs 01-06 por hito** con encabezado | `references/doc-templates.md` | **C — Escritura Docs** | **Medium** (híbrido: High para técnico) |
-| tester               | Si cumple criterios | Reporte de pruebas | `.ai/agents/tester.md`, `.ai/workflows/*` | **D — Validación** | **Medium** (híbrido: Low para ejecución, Medium para diagnóstico) |
+| tester               | Si cumple criterios | Reporte de pruebas | `.ai/agents/tester.md`, `.ai/workflows/*`, `.ai/business/{rules,validation-map}.md` | **D — Validación** | **Medium** (híbrido: Low para ejecución, Medium para diagnóstico) |
 
 Flujo típico de una tarea en `cdk`:
 
@@ -155,6 +155,25 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
 - **Entrada:** código de executioners + criterios del owner. **Salida:** reporte de pruebas
   (pass/fail + evidencia).
 - **Herramientas:** ejecución de pruebas (Read, Bash/PowerShell acotado).
+
+---
+
+## Uso de `business/` por rol (contrato v7)
+
+Aplica **solo si** existe `.ai/business/` (o `.ia/business/`); si no existe, cada rol opera como
+arriba y **no inventa** reglas. No hay rol dedicado: cada uno usa la carpeta para lo suyo. Reglas
+de la carpeta en [`business-blueprint.md`](business-blueprint.md).
+
+| Rol | Qué hace con `business/` |
+|---|---|
+| project-owner | Contrasta el alcance contra `policies.md` y `rules.md`. Si la solicitud **cambia** una regla documentada, lo dice en el veredicto y pide confirmación explícita (cambiar una regla es decisión de negocio, no técnica). |
+| project-analyzer | En el Doc 1 agrega la sección **"Reglas de negocio afectadas"**: cada regla/validación tocada, citando su entrada en `business/`. Una regla afectada que esté `PROVISIONAL` se marca como riesgo; si el cambio depende de su intención, es 🔴 BLOQUEANTE hasta que el usuario responda. |
+| project-manager | Si hay reglas afectadas, incluye una tarea de actualización de `business/` en el backlog. |
+| executioners | Respetan `validation-map.md` (mismas restricciones, mismos mensajes, misma capa) y `rules.md`. **Nunca** "corrigen" en silencio un comportamiento documentado, aunque parezca bug: lo reportan al orchestrator. |
+| tester | Deriva casos de prueba de las reglas y validaciones afectadas (incluidos los bordes que `validation-map.md` §"Lo que NO se valida" deja abiertos). |
+| project-proposer | En el Doc 3 propone cerrar los `PROVISIONAL` tocados por el hito y documentar zonas del dominio que el hito reveló sin cubrir. |
+| project-documenter | Si el cambio altera o agrega una regla, **actualiza `business/`** en el mismo hito: cita nueva `archivo:línea`, y `PROVISIONAL` si la intención no la confirmó el usuario. Lo que el usuario confirme en la sesión se escribe como `> **Negocio:**`. Nunca edita bloques `> **Negocio:**` existentes. |
+| project-orchestrator | Hace cumplir lo anterior; si detecta citas rotas en `business/`, sugiere `ozali --business` al cierre (no las repara dentro del hito). |
 
 ---
 

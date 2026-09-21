@@ -222,10 +222,10 @@ test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 6\n---\n# cdk\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 7\n---\n# cdk\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
-    assert.match(stdout, /contrato v6 \(al día\)/, "doctor marca cdk al día");
+    assert.match(stdout, /contrato v7 \(al día\)/, "doctor marca cdk al día");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -247,7 +247,7 @@ test("doctor NO marca copsis-commit si solo es mención negativa (nunca copsis-c
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 6\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 7\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
     assert.doesNotMatch(stdout, /contiene copsis-commit/, "doctor NO debe marcar copsis-commit en menciones negativas");

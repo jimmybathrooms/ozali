@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 6 -->
+<!-- CDK_CONTRACT_VERSION: 7 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `6`**
+> **Versión de contrato vigente: `7`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -96,7 +96,7 @@ Un `cdk` conforme a la v2 debe cumplir TODO lo de la v1, más:
   - Nunca generar una skill por sí mismo; siempre delegar en `skill-generator`.
 - **Seguridad (Security First):** el `cdk` generado debe incluir en su SKILL.md y en los
   system prompts de sus subagentes las **restricciones de seguridad** del blueprint
-  [`skill-creation-blueprint.md`](../skill-generator/references/skill-creation-blueprint.md) §4:
+  [`skill-creation-blueprint.md`](../../skill-generator/references/skill-creation-blueprint.md) §4:
   - **Nunca** exponer, leer, transmitir ni procesar secretos, contraseñas, tokens,
     credenciales, claves privadas, números de tarjetas, números telefónicos, correos
     electrónicos completos ni rutas a archivos que los contengan.
@@ -248,3 +248,31 @@ Un `cdk` conforme a la v6 debe cumplir TODO lo de la v1–v5, con esta **correcc
   4. Reportar al usuario qué archivos se corrigieron.
 
 - Estampar `cdk_contract_version: 6` en su frontmatter.
+
+### v7 — los agentes consumen las reglas de negocio (`.ai/business/`)
+Un `cdk` conforme a la v7 debe cumplir TODO lo de la v1–v6, más:
+
+- **Consumo condicional de `business/`:** si la carpeta dotted tiene `business/`
+  ([`business-blueprint.md`](business-blueprint.md)), cada subagente la usa según
+  [`agents-blueprint.md`](agents-blueprint.md) §"Uso de `business/` por rol". Si no existe, nada
+  cambia y **nadie inventa reglas**.
+- **Doc 1 del analyzer:** sección obligatoria **"Reglas de negocio afectadas"** cuando existe
+  `business/` (con "ninguna" como respuesta válida).
+- **Cambiar una regla es decisión de negocio:** el owner la hace explícita en su veredicto; los
+  executioners no corrigen en silencio comportamiento documentado.
+- **Mantenimiento en el hito:** el documenter actualiza `business/` si el cambio altera o agrega
+  una regla (cita nueva, `PROVISIONAL` si no hay confirmación, nunca edita `> **Negocio:**`).
+- **No duplica:** `business/` no se copia a `.claude/skills/cdk/`; se referencia.
+
+- **Alcance de la migración v6 → v7** (automática, sin GATE — agrega instrucciones, no cambia la
+  estructura de subagentes):
+  1. En `.claude/skills/cdk/SKILL.md`, agregar la referencia a `.ai/business/` y la regla de
+     consumo condicional.
+  2. En cada `.claude/agents/<rol>.md`, agregar el bloque de su fila de la tabla "Uso de
+     `business/` por rol" (y la sección "Reglas de negocio afectadas" al formato del Doc 1 del
+     analyzer).
+  3. **No** generar `business/` durante la migración: eso lo hace `ozali` en la Fase 2.5 (o
+     `ozali --business`), con su propio GATE. Si falta, sugerirlo al usuario al reportar.
+  4. Reportar al usuario qué archivos se tocaron.
+
+- Estampar `cdk_contract_version: 7` en su frontmatter.

@@ -49,6 +49,24 @@ Si te invocan sin target (uso normal en un solo repo), ignora esta sección y si
 
 ---
 
+## Modo `--business` — solo reglas de negocio
+
+Si la invocación trae `--business` (en cualquier posición: `/ozali --business`,
+`ozali --business módulo de pólizas`), **no** recorres el bootstrap completo ni regeneras `cdk`:
+
+```
+Fase 0 (identidad) → Fase 1 (detectar variante .ai/.ia) → Fase 2.5 (crear o actualizar business/)
+   → 🛑 GATE propio (business-blueprint §9) → escribir → espejo Engram → docs de corrida
+```
+
+- Si no hay fuente de verdad (`.ai/`/`.ia/`), detente: sugiere correr `ozali` completo primero.
+- Si `business/` **no** existe → modo **crear**; si existe → modo **actualizar**
+  ([`references/business-blueprint.md`](references/business-blueprint.md) §2 y §8).
+- El texto que acompañe al flag acota el alcance (módulo, flujo o entidad).
+- No toca `cdk`: sus agentes ya consumen `business/` si existe (contrato v7).
+
+---
+
 ## Flujo general (7 fases)
 
 ```
@@ -56,6 +74,7 @@ Fase 0    Identidad y registro          → quién corre ozali (git/sesión)
 Fase 0.5  Pre-flight de cdk             → ¿existe cdk? ¿versión de contrato vigente? migrar si toca
 Fase 1    Detección fuente de verdad    → ¿existe AI.md/.ai o IA.md/.ia?
 Fase 2    Generación conocimiento       → si falta, evaluar el proyecto y generar AI.md + .ai/
+Fase 2.5  Reglas de negocio             → si falta business/, preguntar y extraerla (o --business)
 Fase 3    Validación + ajustes          → ¿coincide con la estructura real? ajustes mínimos
 Fase 3.5  Calibración testing + TDD     → detectar runner/capas/cobertura y resolver Strict TDD
 Fase 4    Diseño de agentes (cdk)       → 8 roles + esquema de responsabilidades
@@ -214,6 +233,7 @@ esperada dentro de la carpeta dotted:
   context/     → architecture.md, coding-standards.md, tech-stack.md
   knowledge/   → learning-notes.md, README.md
   workflows/   → feature.md, bugfix.md, hotfix.md, refactor.md
+  business/    → (opcional) reglas de negocio — ver Fase 2.5
 ```
 
 ---
@@ -241,6 +261,27 @@ Lo generado es **provisional**: continúa a Fase 3 y valídalo igual que una fue
 
 ---
 
+## Fase 2.5 — Extracción de reglas de negocio (`business/`)
+
+Corre en **ambas rutas** (FOUND y GENERATE) cuando la carpeta dotted no tiene `business/`.
+Reglas completas en [`references/business-blueprint.md`](references/business-blueprint.md).
+
+1. **Pregunta** al usuario si quiere extraerla ahora, con una estimación honesta: tamaño del repo
+   (entidades/servicios o componentes), que el resultado deja marcas `PROVISIONAL` que negocio
+   debe cerrar, y que puede hacerlo después con `ozali --business`.
+   - **No** → continúa a Fase 3; anótalo en `01-analisis.md` y en `03-mejoras.md` (relevancia Media).
+   - **Sí** → sigue.
+2. **Extrae** según las fuentes por tipo de proyecto (blueprint §5) y la prioridad de alcance
+   (blueprint §7), con la estructura canónica (§3) y el esqueleto por archivo (§6).
+3. **Regla anti-inferencia:** documenta lo que el código **hace** citando `archivo:línea`; la
+   intención no confirmada va como `<!-- PROVISIONAL: confirmar con negocio -->` + pregunta.
+   Nunca afirmes el *porqué* de negocio de memoria o por el nombre de una variable.
+4. Agrega la fila **Reglas de Negocio** a `AI.md` (knowledge-blueprint §4).
+
+El resumen (conteos + PROVISIONAL + muestra de citas, blueprint §9) entra al GATE de la Fase 5.
+
+---
+
 ## Fase 3 — Validación contra la estructura real + ajustes mínimos
 
 La fuente de verdad es **provisional** hasta validarla contra el código real.
@@ -250,6 +291,9 @@ La fuente de verdad es **provisional** hasta validarla contra el código real.
 3. Marca **discrepancias** (carpetas/módulos que existen y no están documentados, o viceversa).
 4. Aplica **solo ajustes mínimos** necesarios para una primera iteración coherente.
 5. Todo cambio mayor se anota como **propuesta** para el documento 3 (mejoras), no se aplica.
+6. Si existe `business/` (encontrada o recién extraída), **verifica una muestra de citas**
+   `archivo:línea` contra el código; si hay citas rotas, propón `ozali --business` (modo
+   actualizar) en vez de corregirlas aquí.
 
 Resultado: una fuente de verdad **validada** y el inventario de hitos/discrepancias que alimenta
 el documento 1 (análisis).
@@ -338,6 +382,8 @@ Presenta al usuario un plan claro y conciso que incluya:
 - Nombre canónico de la fuente de verdad detectada y variante (`AI.md/.ai` vs `IA.md/.ia`).
 - Resumen de discrepancias y ajustes mínimos aplicados en Fase 3.
 - **Calibración de pruebas** (Fase 3.5): capacidades detectadas + `strict_tdd: true|false` + comandos verdes.
+- **Reglas de negocio** (Fase 2.5): si se extrajo, archivos + conteo de reglas/validaciones/
+  `PROVISIONAL` + muestra de citas; si se omitió o ya existía, dilo en una línea.
 - Los 8 subagentes a crear (ruta, responsabilidad de una línea, herramientas).
 - Estructura de archivos que generará `cdk`.
 - La ruta de documentación, nomenclatura de logs y **destino del histórico** (repo de conocimiento aislado).
@@ -480,8 +526,12 @@ Solo tras la aprobación de la Fase 5. Genera:
  4. Cualquier otra referencia/plantilla que `cdk` necesite.
 
 > La fuente de verdad sigue siendo **únicamente** `AI.md` + `.ai/` — `cdk` la referencia,
-> **no la duplica** dentro de la skill. No copies `context/` ni `workflows/` a
+> **no la duplica** dentro de la skill. No copies `context/`, `workflows/` ni `business/` a
 > `.claude/skills/cdk/`.
+>
+> **Reglas de negocio (contrato v7):** los subagentes consumen `.ai/business/` **si existe**, cada
+> uno para lo suyo (ver [`references/agents-blueprint.md`](references/agents-blueprint.md)
+> §"Uso de `business/` por rol"). Si no existe, operan igual que antes: nunca inventan reglas.
 
 Tras generar, escribe los 3 documentos de la corrida y resume al usuario qué quedó creado y
 cómo invocar `cdk`.
