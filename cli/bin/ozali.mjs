@@ -47,7 +47,7 @@ ${c.bold("Opciones comunes:")}
   --update             (workspace) Actualiza (skills/permisos/jarvis) TODOS los repos miembros.
    --knowledge-repo <p> (init) Ruta del repo de conocimiento.
    --knowledge-only     (init) Solo configura el repo de conocimiento (sin skills/agents/Engram).
-   --no-engram          (init) No usar Engram; arranca en modo docs.
+   --no-engram          (init/update) No usar ni instalar Engram; modo docs.
    --no-trust           (init) No marcar el workspace como confiable en Claude Code.
    --no-jarvis          (init/update) No crear/refrescar el orquestador ozali-jarvis.
    --rollback           (update) Restaura skills desde su backup más reciente.

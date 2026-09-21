@@ -2257,9 +2257,11 @@ export async function update(cwd, opts = {}) {
       warnEngramOpencodeStatus(env.engramOpencode);
     }
   } else {
-    // Engram no está instalado: avisar y ofrecer instalar
+    // Engram no está instalado: avisar y ofrecer instalar (salvo --no-engram)
     warn("Engram no está instalado.");
-    const installNow = opts.yes ? true : await confirm("¿Instalo y configuro Engram ahora?", true);
+    if (opts.noEngram) info("--no-engram: no instalo Engram; el repo sigue en modo " + c.bold("docs") + ".");
+    const installNow = opts.noEngram ? false
+      : (opts.yes ? true : await confirm("¿Instalo y configuro Engram ahora?", true));
     if (installNow) {
       const installed = installEngram();
       if (installed) {

@@ -42,9 +42,17 @@ after(() => {
 });
 
 function run(args, cwd, expectFail = false) {
+  // `update` (y `workspace --update`, que lo llama por miembro) ofrece instalar Engram si falta,
+  // y sin TTY `confirm` toma el default (sí): en un runner sin Engram el suite lo INSTALABA de
+  // verdad (tarball o `go install`). Ningún test necesita eso; se apaga aquí para todos.
+  if ((args[0] === "update" || args.includes("--update")) && !args.includes("--no-engram")) {
+    args = [...args, "--no-engram"];
+  }
   const home = homeFor(cwd);
   // USERPROFILE además de HOME: os.homedir() usa ese en Windows.
-  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  // GOFLAGS=-modcacherw: si algo llega a correr `go install`, Go deja su caché de módulos
+  // en $HOME/go en SOLO LECTURA y el after() no la podría borrar (EACCES en CI).
+  const env = { ...process.env, HOME: home, USERPROFILE: home, GOFLAGS: "-modcacherw" };
   try {
     const stdout = execFileSync(process.execPath, [BIN, ...args], { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     return { code: 0, stdout };
@@ -693,6 +701,9 @@ test("update migra los modelos legados y sube la versión del config", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf8"));
     assert.equal(cfg.version, pkg.version, "update sube la versión del config a la del CLI");
     assert.match(stdout, /alias \(contrato cdk v6\)/, "avisa de la migración de modelos");
+    if (/Engram no está instalado/.test(stdout)) {
+      assert.match(stdout, /--no-engram: no instalo Engram/, "update --no-engram no intenta instalar Engram");
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
