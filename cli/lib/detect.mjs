@@ -19,6 +19,26 @@ export function detectSourceOfTruth(cwd) {
   return { found: false, variant: "AI", doc: "AI.md", dir: ".ai" };
 }
 
+/**
+ * Detección de la carpeta `business/` dentro de la fuente de verdad (Fase 2.5 / P-007).
+ * Lee el commit base del pie del `README.md` (formato: `Commit base: <sha>`, ver
+ * business-blueprint.md §6) para que `doctor` pueda medir la deriva contra `HEAD`.
+ * Devuelve { exists, dir, commitBase }.
+ */
+export function detectBusiness(cwd, sot) {
+  const dirName = sot && sot.dir ? sot.dir : ".ai";
+  const dir = path.join(cwd, dirName, "business");
+  if (!exists(dir)) return { exists: false, dir, commitBase: null };
+  const readme = path.join(dir, "README.md");
+  let commitBase = null;
+  if (exists(readme)) {
+    const text = fs.readFileSync(readme, "utf8");
+    const m = text.match(/commit\s*base\s*[:：]?\s*`?([0-9a-f]{7,40})/i);
+    if (m) commitBase = m[1];
+  }
+  return { exists: true, dir, commitBase };
+}
+
 /** Agentes presentes: claude-code y/o opencode. */
 export function detectAgents(cwd) {
   const claudeProject = exists(path.join(cwd, ".claude"));

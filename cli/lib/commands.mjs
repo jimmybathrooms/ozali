@@ -13,7 +13,7 @@ import {
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
   toPortablePath, fromPortablePath, parseSemver, compareSemver,
 } from "./util.mjs";
-import { detectAll, detectSourceOfTruth, detectWorkspace, detectReferences, findWorkspaceRootUp, detectEngramMcpServer,
+import { detectAll, detectSourceOfTruth, detectBusiness, detectWorkspace, detectReferences, findWorkspaceRootUp, detectEngramMcpServer,
 } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
 
@@ -1622,6 +1622,26 @@ export async function doctor(cwd, opts = {}) {
   add("Repo git", env.git.isRepo, env.git.isRepo ? (env.git.commit ? `${env.git.branch}@${env.git.commit}` : "repo sin commits") : "no es repo git");
   add("Node ≥ 16", env.node.needsNode ? env.node.ok : true, env.node.needsNode ? env.node.version : `${env.node.version} (no aplica a este proyecto)`);
   add("Fuente de verdad", env.sot.found, env.sot.found ? `${env.sot.doc} + ${env.sot.dir}/` : "ausente (corre la skill 'ozali')");
+  // Reglas de negocio (P-007): deriva de la carpeta business/ contra HEAD. El commit base lo
+  // estampa la Fase 2.5 en el pie del README.md; si no existe o el repo no permite medirla,
+  // la fila lo dice sin romper el health-check.
+  {
+    const biz = detectBusiness(cwd, env.sot);
+    if (!biz.exists) {
+      add("Reglas de negocio", true, "no hay business/ (corre la skill 'ozali' Fase 2.5)");
+    } else if (!biz.commitBase) {
+      add("Reglas de negocio", true, `business/ presente sin commit base en el pie del README (Fase 2.5 no lo estampó) → deriva no medible`);
+    } else {
+      const drift = businessDrift(cwd, biz.commitBase);
+      if (drift == null) {
+        add("Reglas de negocio", true, `business/ con commit base ${biz.commitBase} pero sin repo git → deriva no medible`);
+      } else if (drift.pct > 0.2) {
+        add("Reglas de negocio", false, `deriva alta: ${Math.round(drift.pct * 100)}% de archivos fuente cambiados (${drift.changed}/${drift.total}) desde ${biz.commitBase} → corre 'ozali --business' para actualizar`);
+      } else {
+        add("Reglas de negocio", true, `${Math.round(drift.pct * 100)}% de archivos fuente cambiados (${drift.changed}/${drift.total}) desde ${biz.commitBase} · sin deriva`);
+      }
+    }
+  }
   add("Skill ozali instalada", env.skill.installed, env.skill.installed ? env.skill.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   add("Skill skill-generator", env.skillGenerator.installed, env.skillGenerator.installed ? env.skillGenerator.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   add("Skill ozali-commit", env.ozaliCommit.installed, env.ozaliCommit.installed ? env.ozaliCommit.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init / ozali install-skills)");
@@ -1934,6 +1954,28 @@ function detectConfigStale(cwd) {
   const diffMin = Math.round((configMtime - newestAgentMtime) / 60000);
   const ago = diffMin < 60 ? `hace ${diffMin} min` : `hace ${Math.round(diffMin / 60)} h`;
   return { stale: true, configMtimeAgo: ago };
+}
+
+/**
+ * Deriva de la carpeta `business/` (P-007): % de archivos fuente que cambiaron entre el commit
+ * base estampado en el pie del README y `HEAD`. Devuelve { changed, total, pct } o null si no
+ * se puede medir (sin repo git o commit base inválido). Solo cuenta archivos fuente: ignora la
+ * carpeta dotted, `.ozali/`, `.claude/`/`.opencode/` y los `.md` de raíz.
+ */
+function businessDrift(cwd, commitBase) {
+  if (!tryExec("git", ["rev-parse", "--is-inside-work-tree"], { cwd })) return null;
+  // `cat-file -e` no imprime nada (exit 0 = existe): con tryExec devolvería "" (falsy) y daría
+  // falso negativo. `rev-parse --verify` sí imprime el SHA → string no vacío.
+  if (!commitBase || !tryExec("git", ["rev-parse", "--verify", "--quiet", `${commitBase}^{commit}`], { cwd })) return null;
+  const changedRaw = tryExec("git", ["diff", "--name-only", `${commitBase}..HEAD`], { cwd });
+  const totalRaw = tryExec("git", ["ls-tree", "-r", "--name-only", commitBase], { cwd });
+  if (changedRaw == null || totalRaw == null) return null;
+  const isSource = (p) =>
+    !/^\.(ai|ia)\//.test(p) && !/^\.ozali\//.test(p) && !/^\.(claude|opencode)\//.test(p) && !/\.md$/.test(p);
+  const changed = changedRaw.split("\n").filter((p) => p && isSource(p)).length;
+  const total = totalRaw.split("\n").filter((p) => p && isSource(p)).length;
+  if (total === 0) return null;
+  return { changed, total, pct: changed / total };
 }
 
 function readStrictTdd(cwd, sot) {

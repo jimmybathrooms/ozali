@@ -23,6 +23,19 @@ vocabulario y flujos.
 contrastarlas con el código. Una regla inventada en `business/` es peor que un hueco: los agentes
 de `cdk` la tratan como verdad y la hacen cumplir.
 
+**Regla dura anti-cuantificadores (P-005):** un cuantificador absoluto —"ninguno", "siempre", "en
+ningún", "todo", "nunca"— **solo entra si viene de un conteo ejecutado**, y la afirmación cita el
+**comando y su resultado**: p. ej. *"0 `@Pattern` en `src/main/java` (grep, 2026-09-21)"* o *"no hay
+`delete()` en los 3 repositorios de catálogo (grep sobre `*Repository.java`, 2026-09-22)"*.
+
+- Sin conteo, la afirmación se degrada a la forma **acotada**: *"en los servicios revisados (X, Y,
+  Z)…"* — nunca al universo entero.
+- El **verificador (§9.1) marca los cuantificadores sin respaldo** como inválidos.
+- Motivo: la base manual del POC afirmó *"no hay `delete()` en ningún repositorio de catálogo"*
+  citando un solo servicio, falso ya en su propio commit (había tres borrados físicos). Es la forma
+  de error más cara: los agentes de `cdk` tratan la frase como invariante y "corrigen" código sano
+  para cumplirla.
+
 Consecuencias prácticas:
 - Un **bug** documentado sigue siendo el comportamiento actual: se anota como bug (`> ⚠️ Deuda
   real:`), **no** se corrige en la doc ni se describe como "debería".
@@ -79,6 +92,11 @@ Una afirmación **sin** marca no entra. El extractor solo produce las marcas 1 y
 solo la escribe una persona (o el agente transcribiendo textualmente lo que el usuario dijo en la
 sesión, citándolo).
 
+> **Cuantificadores absolutos (P-005):** la marca 1 (**Evidencia de código**) no ampara
+> *"ninguno/siempre/en ningún"* por sí sola: exige el **conteo ejecutado** citado (§1). Sin él, la
+> afirmación se degrada a la forma acotada y queda bajo la marca 1 normal (cita puntual), nunca
+> como invariante universal.
+
 ---
 
 ## 5. Dónde buscar (fuentes de extracción → archivo destino)
@@ -89,10 +107,13 @@ sesión, citándolo).
 |---|---|---|
 | Enums de estado/tipo (`*Status`, `*Tipo`, `*Estatus`) | valores, uso real (¿se referencia o está muerto?) | `domain-model.md` |
 | Entidades JPA y sus relaciones | entidades del dominio, cadenas (`Ramo → SubRamo → …`), borrado lógico | `domain-model.md` |
+| **Anotaciones de la entidad** (`updatable`, `insertable`, `nullable`, `unique`, `@Convert`) | reglas de negocio expresadas en el mapeo: un campo no se vacía, no cambia de ramo, es único | `domain-model.md` |
 | Forms/DTOs con Bean Validation (`@NotNull`, `@Size`, `@Pattern`…) | campo, restricción, mensaje | `validation-map.md` §capa declarativa |
 | `throw new *ValidationException` en services | condición y mensaje | `validation-map.md` §capa de negocio + `rules.md` |
 | Condicionales en services (`switch` por aseguradora, tolerancias, defaults) | la regla y sus ramas | `rules.md` |
 | Cálculos (primas, IVA, prorrateos, fechas) | fórmula tal cual, con constantes | `rules.md` |
+| **Utilidades de asignación** (`Values.getValue`, helpers de patch/merge) | qué significa "campo ausente" en una edición: un campo que no se puede vaciar con `null`, un patch parcial | `rules.md` |
+| **Olores de servicio con efecto de negocio** | `setStatus(1)` fijo en un `save` que también edita (reactivación implícita de un registro dado de baja), `save()` repetido dos veces, llamadas a servicios externos antes de persistir | `rules.md` (+ PROVISIONAL si la intención no está confirmada) |
 | Exception handlers (`@ControllerAdvice`) | qué error → qué HTTP y cuerpo | `validation-map.md` §cómo se disparan |
 | Filtros/interceptores de seguridad, headers de identidad, `socioID`/tenant | quién puede qué, aislamiento | `policies.md` |
 | Auditoría (`@CreatedBy`, `Auditable`, bitácoras) | qué se registra y cuándo | `policies.md` |
@@ -126,6 +147,9 @@ validaciones o decisiones que el sistema no hace).
 - **`README.md`** — Por qué existe · Tabla de contenido (archivo → qué contiene) · Cómo se
   mantiene (§4 de este blueprint, copiado) · Reglas duras para quien edite · Pie con fecha,
   rama y commit base de la extracción.
+  - **Formato canónico del pie (lo lee `ozali doctor`, P-007):** última línea del README,
+    `Commit base: <sha>` — p. ej. `> Extracción: 2026-09-22 · Rama: main · Commit base: \`95b54aa\``.
+    Sin esa marca el doctor no puede medir la deriva; la Fase 2.5 la estampa **siempre**.
 - **`domain-model.md`** — 1. Cómo se representa el estado (flags, enums, catálogos en BD) ·
   2. Enums del dominio (uno por `###`, marcar los **declarados pero no usados**) ·
   3. Entidades principales · 4. Catálogos · 5. Auditoría · N. **Lo que este servicio NO decide**.
@@ -166,9 +190,14 @@ dato y la regla, no el dato.
 
 ## 8. Modo actualizar (`--business` con carpeta existente)
 
-1. Lee el pie del `README.md` (commit base) y calcula el delta:
-   `git diff --stat <commit-base>..HEAD` sobre las fuentes de §5.
-2. **Revalida cada cita** `archivo:línea` de la carpeta:
+1. **Reporta la caducidad ANTES de extraer nada (P-007):** revalida cada cita `archivo:línea` de
+   la carpeta contra el código actual y presenta, como primer paso:
+   - **% de citas vivas** (válidas y con contenido respaldado, §9.1) y la **lista de rotas**;
+   - el delta desde el commit base del pie del `README.md`:
+     `git diff --stat <commit-base>..HEAD` sobre las fuentes de §5.
+   - Si la deriva supera el umbral (el `doctor` avisa >20%), dilo en el GATE: la carpeta está
+     desactualizada y las reglas pueden no reflejar el código.
+2. **Revalida cada cita** `archivo:línea` de la carpeta (reglas del verificador §9.1):
    - el archivo ya no existe o la línea no contiene lo citado → corrige la cita si lo encuentras
      movido; si la regla desapareció, márcala `> ⚠️ Ya no se encuentra en el código (desde <sha>)`
      y **pregunta** antes de borrarla;
@@ -185,14 +214,43 @@ dato y la regla, no el dato.
 
 ## 9. Validación y GATE
 
+### 9.1 Verificador de citas por contenido (paso fijo, antes del GATE)
+
+> **Regla dura (P-004):** verificar que la línea citada existe **no basta**: la afirmación debe
+> estar respaldada por el **contenido** del rango citado, no solo por el rango. En el POC, el único
+> error factual del extractor citaba el `catch` correcto con una afirmación falsa sobre el mensaje
+> del 409.
+
+El verificador corre **siempre** antes del GATE (en la corrida normal y en `--business`, modo crear
+y actualizar) y comprueba cada afirmación citada:
+
+1. **Extraer identificadores** de la afirmación: clase, método, campo, constante, literal de
+   mensaje (los tokens entre backticks y los nombres en CamelCase/snake_case).
+2. **Exigir que al menos uno aparezca en el rango citado** (`archivo:línea`). Si ninguno aparece,
+   la cita está mal o la afirmación es inventada → corregir la cita o reformular la afirmación.
+3. **Ausencias ("no valida", "no se llama", "no existe") no se prueban con una cita:** exigir el
+   **comando de búsqueda** que lo respalda y su resultado (ver P-005, §1): p. ej.
+   *"0 `@Pattern` en `src/main/java` (grep, 2026-09-21)"*.
+4. **Cuantificadores absolutos** ("ninguno", "siempre", "en ningún", "todo") sin conteo ejecutado
+   citado → el verificador los marca como inválidos (P-005).
+
+El verificador es **reutilizable en el modo actualizar** (P-007): la revalidación de citas de §8
+usa exactamente estas reglas y reporta el % de citas vivas.
+
+**Sembrado de prueba:** una afirmación que cite una línea correcta con un símbolo que no aparece en
+ella debe ser marcada; un cuantificador absoluto sin comando de conteo, también.
+
+### 9.2 Contenido del GATE
+
 Antes del 🛑 GATE (en la corrida normal, dentro del GATE de la Fase 5; con `--business`, un GATE
 propio) presenta:
 
 - Archivos generados/actualizados con su nº de líneas.
 - **Conteo de reglas** (secciones de `rules.md`), **validaciones** (filas de `validation-map.md`) y
   **PROVISIONAL** por archivo — el total de PROVISIONAL es la lista de trabajo para negocio.
-- Muestra de 3 citas verificadas al azar (archivo:línea → fragmento real).
-- En modo actualizar: citas corregidas, reglas desaparecidas, reglas nuevas.
+- Muestra de 3 citas verificadas al azar (archivo:línea → fragmento real) **+ resultado del
+  verificador por contenido** (§9.1): citas que pasaron, corregidas y rechazadas.
+- En modo actualizar: citas corregidas, reglas desaparecidas, reglas nuevas y **% de citas vivas**.
 - Lo que quedó fuera por alcance (§7).
 
 Tras la aprobación, espeja un resumen a Engram:

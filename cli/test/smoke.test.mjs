@@ -1258,3 +1258,80 @@ test("el suite no toca el HOME real: `update` refresca la skill global DENTRO de
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------- P-007: doctor
+// Fila "Reglas de negocio": compara el commit base del pie del README.md de business/
+// contra HEAD y avisa por encima del umbral de deriva (P-007 de docs/pendientes.md).
+function gitCommit(dir, msg) {
+  execFileSync("git", ["config", "user.email", "t@test"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "T"], { cwd: dir });
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-q", "-m", msg], { cwd: dir });
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir }).toString().trim();
+}
+
+function businessPie(sha) {
+  return `# Reglas de negocio
+
+> Extracción: 2026-09-27 · Rama: main · Commit base: \`${sha}\`
+`;
+}
+
+test("doctor reporta 'no hay business/' cuando la fuente de verdad no tiene la carpeta", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".ai", "context"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ai", "context", "tech-stack.md"), "# stack\n");
+    const { stdout } = run(["doctor"], dir, true);
+    assert.match(stdout, /Reglas de negocio/, "doctor incluye la fila Reglas de negocio");
+    assert.match(stdout, /no hay business/, "informa que business/ no existe");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor marca Reglas de negocio al día cuando el commit base == HEAD", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, "src", "main", "java"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src", "main", "java", "A.java"), "class A {}\n");
+    fs.mkdirSync(path.join(dir, ".ai", "context"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ai", "context", "tech-stack.md"), "# stack\n");
+    const head = gitCommit(dir, "base con fuente");
+    fs.mkdirSync(path.join(dir, ".ai", "business"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ai", "business", "README.md"), businessPie(head));
+    gitCommit(dir, "agrega business");
+    const { stdout } = run(["doctor"], dir, true);
+    assert.match(stdout, /Reglas de negocio/, "doctor incluye la fila Reglas de negocio");
+    assert.match(stdout, /al día|sin deriva/, "marca sin deriva cuando base == HEAD");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor avisa deriva en Reglas de negocio cuando el código cambió desde el commit base", () => {
+  const dir = tmpProject();
+  try {
+    // 5 fuentes en el commit base; business/ apunta a ese commit.
+    fs.mkdirSync(path.join(dir, "src", "main", "java"), { recursive: true });
+    for (const f of ["A", "B", "C", "D", "E"]) {
+      fs.writeFileSync(path.join(dir, "src", "main", "java", `${f}.java`), `class ${f} {}\n`);
+    }
+    fs.mkdirSync(path.join(dir, ".ai", "context"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ai", "context", "tech-stack.md"), "# stack\n");
+    const base = gitCommit(dir, "base con 5 fuentes");
+    fs.mkdirSync(path.join(dir, ".ai", "business"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ai", "business", "README.md"), businessPie(base));
+    gitCommit(dir, "agrega business");
+    // Cambia 3 de 5 fuentes (60% > umbral 20%).
+    for (const f of ["A", "B", "C"]) {
+      fs.writeFileSync(path.join(dir, "src", "main", "java", `${f}.java`), `class ${f}2 {}\n`);
+    }
+    gitCommit(dir, "deriva de fuentes");
+    const { stdout } = run(["doctor"], dir, true);
+    assert.match(stdout, /Reglas de negocio/, "doctor incluye la fila Reglas de negocio");
+    assert.match(stdout, /deriva/, "avisa de deriva por encima del umbral");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

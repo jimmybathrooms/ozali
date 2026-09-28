@@ -276,9 +276,16 @@ Reglas completas en [`references/business-blueprint.md`](references/business-blu
 3. **Regla anti-inferencia:** documenta lo que el código **hace** citando `archivo:línea`; la
    intención no confirmada va como `<!-- PROVISIONAL: confirmar con negocio -->` + pregunta.
    Nunca afirmes el *porqué* de negocio de memoria o por el nombre de una variable.
+   **Cuantificadores absolutos ("ninguno", "siempre", "en ningún") solo con conteo ejecutado citado
+   (P-005, blueprint §1); sin conteo, degrada a la forma acotada.**
 4. Agrega la fila **Reglas de Negocio** a `AI.md` (knowledge-blueprint §4).
+5. **Verifica por contenido (P-004, blueprint §9.1):** corre el verificador de citas —cada
+   afirmación debe tener al menos un identificador (clase, método, campo, constante, literal) en
+   su rango citado; las ausencias exigen el comando de búsqueda que las respalda— y corrige lo que
+   marque **antes** de armar el GATE.
 
-El resumen (conteos + PROVISIONAL + muestra de citas, blueprint §9) entra al GATE de la Fase 5.
+El resumen (conteos + PROVISIONAL + muestra de citas **verificadas por contenido**, blueprint §9)
+entra al GATE de la Fase 5.
 
 ---
 
@@ -292,8 +299,10 @@ La fuente de verdad es **provisional** hasta validarla contra el código real.
 4. Aplica **solo ajustes mínimos** necesarios para una primera iteración coherente.
 5. Todo cambio mayor se anota como **propuesta** para el documento 3 (mejoras), no se aplica.
 6. Si existe `business/` (encontrada o recién extraída), **verifica una muestra de citas**
-   `archivo:línea` contra el código; si hay citas rotas, propón `ozali --business` (modo
-   actualizar) en vez de corregirlas aquí.
+   `archivo:línea` contra el código **por contenido** (P-004, blueprint §9.1); si hay citas rotas
+   o la deriva del commit base supera el umbral, propón `ozali --business` (modo actualizar) en vez
+   de corregirlas aquí — el modo actualizar reporta el **% de citas vivas** antes de extraer nada
+   (P-007, blueprint §8).
 
 Resultado: una fuente de verdad **validada** y el inventario de hitos/discrepancias que alimenta
 el documento 1 (análisis).
