@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, dashboard } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, installSkill, dashboard } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -21,6 +21,11 @@ ${c.bold("Comandos:")}
   install-engram
             Instala (o reinstala) Engram bajo demanda, registra su MCP en el agente
             y activa modo hybrid. Úsalo cuando saltaste la instalación en init.
+  install-skill
+            Instala skills del pool de grill (Matt Pocock) en el scope indicado
+            (global por defecto). Uso: ozali install-skill <skill>… donde <skill>
+            es una del pool (grill-me, grilling, grill-with-docs, domain-modeling)
+            o el alias "grill" para el set completo. Con --list muestra el pool.
   workspace Multi-repo: toma los repos de la carpeta raíz (y los folders de un
             *.code-workspace de VSCode/Antigravity), remedia los que no tienen ozali init,
             guía la calibración y escribe la config para trabajar en conjunto.
@@ -52,6 +57,7 @@ ${c.bold("Opciones comunes:")}
    --no-jarvis          (init/update) No crear/refrescar el orquestador ozali-jarvis.
    --rollback           (update) Restaura skills desde su backup más reciente.
    --skills             (update) Fuerza actualización de skills aunque esté frozen.
+   --list               (install-skill) Lista las skills del pool de grill.
    --fix                (doctor) Auto-remedia problemas detectados (repo de conocimiento, TDD…).
   --import             (sync) Importa del repo de conocimiento a local.
   --push               (sync) Hace push al remoto del repo de conocimiento.
@@ -103,6 +109,7 @@ function parseArgs(argv) {
     else if (a === "--knowledge-only") opts.knowledgeOnly = true;
     else if (a === "--rollback") opts.rollback = true;
     else if (a === "--skills") opts.skills = true;
+    else if (a === "--list") opts.list = true;
     else if (a === "--fix") opts.fix = true;
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "-v" || a === "--version") opts.version = true;
@@ -131,6 +138,7 @@ async function main() {
     case "cloud": return await cloud(cwd, opts);
     case "dashboard": return await dashboard(cwd, opts);
     case "install-skills": return await installSkills(cwd, opts);
+    case "install-skill": return await installSkill(cwd, opts);
     case "install-engram": return await installEngramCmd(cwd, opts);
     default:
       err(`comando desconocido "${cmd}". Usa ${c.bold("ozali --help")}.`);

@@ -5,7 +5,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import {
   c, ok, warn, err, info, step,
-  SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
+  SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, SKILL_GRILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, pruneGitignore, GITIGNORE_OBSOLETE, gitTracks, migrateClaudeModelAliases,
   findAbstractModelFrontmatters, resolveModelForLevel, setFrontmatterModel,
   tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
@@ -72,6 +72,24 @@ function commitSkillTargetOpencode(cwd, scope) {
 function skillGeneratorTargetOpencode(cwd, scope) {
   const base = scope === "global" ? path.join(process.env.HOME || "", ".config", "opencode") : path.join(cwd, ".opencode");
   return path.join(base, "skills", "skill-generator");
+}
+
+/**
+ * Ruta donde se copia una skill del pool de grill para Claude Code.
+ * Global: ~/.claude/skills/<skill> · Project: <cwd>/.claude/skills/<skill>
+ */
+function grillSkillTarget(cwd, scope, skill) {
+  const base = scope === "global" ? path.join(process.env.HOME || "", ".claude") : path.join(cwd, ".claude");
+  return path.join(base, "skills", skill);
+}
+
+/**
+ * Ruta donde se copia una skill del pool de grill para opencode.
+ * Global: ~/.config/opencode/skills/<skill> · Project: <cwd>/.opencode/skills/<skill>
+ */
+function grillSkillTargetOpencode(cwd, scope, skill) {
+  const base = scope === "global" ? path.join(process.env.HOME || "", ".config", "opencode") : path.join(cwd, ".opencode");
+  return path.join(base, "skills", skill);
 }
 
 function readTeamCloud(cwd) {
@@ -2514,6 +2532,97 @@ export async function installSkills(cwd, opts = {}) {
     ok(`Skill skill-generator instalada en opencode: ${path.relative(cwd, ocGen) || ocGen}`);
   }
 
+  info("Reinicia tu agente para que reconozca las skills instaladas.");
+  return 0;
+}
+
+// =========================================================== install-skill ===
+/**
+ * Skills disponibles en el pool de grill (skill-grill/ del paquete). Los nombres
+ * son las carpetas dentro del pool, más el alias "grill" que instala el set
+ * completo (grill-me, grilling, grill-with-docs, domain-modeling).
+ */
+export const GRILL_POOL = [
+  "grill-me",
+  "grilling",
+  "grill-with-docs",
+  "domain-modeling",
+];
+
+/** Resuelve los nombres pedidos a la lista de skills reales del pool. */
+function resolveGrillSkills(requested) {
+  const names = requested && requested.length ? requested : ["grill"];
+  const out = new Set();
+  for (const n of names) {
+    if (n === "grill") {
+      GRILL_POOL.forEach((s) => out.add(s));
+    } else if (GRILL_POOL.includes(n)) {
+      out.add(n);
+    } else {
+      warn(`Skill "${n}" no está en el pool de grill (opciones: grill, ${GRILL_POOL.join(", ")}).`);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Instala skills del pool de grill (Matt Pocock) en el scope indicado
+ * (global por defecto), para Claude Code y/o opencode según --agent.
+ *
+ * Uso:
+ *   ozali install-skill grill                 # set completo (alias)
+ *   ozali install-skill grill-with-docs       # una skill
+ *   ozali install-skill grill --list          # lista el pool
+ *   ozali install-skill grill --scope project # en el repo actual
+ */
+export async function installSkill(cwd, opts = {}) {
+  step("ozali install-skill — instalar skills de grill (pool ozali)");
+  const env = detectAll(cwd);
+
+  if (opts.list) {
+    info(`Skills en el pool de grill (${GRILL_POOL.length}):`);
+    for (const s of GRILL_POOL) ok(`- ${s}`);
+    info('Usa "ozali install-skill grill" para instalarlas todas.');
+    return 0;
+  }
+
+  const scope = opts.scope || "global";
+  const agent = opts.agent || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
+    : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
+
+  const skills = resolveGrillSkills(opts._.slice(1));
+  if (skills.length === 0) {
+    err('No hay skills que instalar. Usa "ozali install-skill grill" o --list para ver el pool.');
+    return 1;
+  }
+
+  let installed = 0;
+  for (const skill of skills) {
+    const src = path.join(SKILL_GRILL_SRC, skill);
+    if (!exists(src)) {
+      warn(`Origen no encontrado en el paquete: ${src}`);
+      continue;
+    }
+    if (agent === "claude-code" || agent === "both") {
+      const target = grillSkillTarget(cwd, scope, skill);
+      ensureDir(path.dirname(target));
+      copyDir(src, target);
+      ok(`Skill ${c.bold(skill)} instalada en Claude Code: ${path.relative(cwd, target) || target}`);
+      installed++;
+    }
+    if (agent === "opencode" || agent === "both") {
+      const ocTarget = grillSkillTargetOpencode(cwd, scope, skill);
+      ensureDir(path.dirname(ocTarget));
+      copyDir(src, ocTarget);
+      ok(`Skill ${c.bold(skill)} instalada en opencode: ${path.relative(cwd, ocTarget) || ocTarget}`);
+      installed++;
+    }
+  }
+
+  if (installed === 0) {
+    warn("No se instaló ninguna skill.");
+    return 1;
+  }
   info("Reinicia tu agente para que reconozca las skills instaladas.");
   return 0;
 }

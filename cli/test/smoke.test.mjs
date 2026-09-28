@@ -1335,3 +1335,43 @@ test("doctor avisa deriva en Reglas de negocio cuando el código cambió desde e
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---- install-skill (pool de grill) -------------------------------------------
+
+test("install-skill --list muestra el pool de grill", () => {
+  const dir = tmpProject();
+  try {
+    const { stdout } = run(["install-skill", "--list"], dir);
+    assert.match(stdout, /pool de grill/, "imprime la cabecera del pool");
+    for (const s of ["grill-me", "grilling", "grill-with-docs", "domain-modeling"]) {
+      assert.match(stdout, new RegExp(s), `lista ${s}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("install-skill grill instala el set completo en el scope indicado", () => {
+  const dir = tmpProject();
+  try {
+    const { stdout } = run(["install-skill", "grill", "--agent", "claude-code", "--scope", "project"], dir);
+    for (const s of ["grill-me", "grilling", "grill-with-docs", "domain-modeling"]) {
+      assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", s, "SKILL.md")), `${s} instalada en project`);
+    }
+    assert.match(stdout, /grill-me/, "menciona la skill instalada");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("install-skill con nombre desconocido avisa y no instala nada", () => {
+  const dir = tmpProject();
+  try {
+    const { code, stdout } = run(["install-skill", "no-existe", "--agent", "claude-code", "--scope", "project"], dir, true);
+    assert.equal(code, 1, "sale con código 1");
+    assert.match(stdout, /no está en el pool/, "avisa que no está en el pool");
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "no-existe")), "no instala nada");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

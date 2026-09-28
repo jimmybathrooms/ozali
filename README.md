@@ -81,6 +81,7 @@ git clone <repo> && node ozali/cli/bin/ozali.mjs init
 ```bash
 ozali init           # detecta agente, instala skills ozali + ozali-commit, aísla histórico, configura Engram
 ozali install-skills # instala skills globales cuando el repo ya está calibrado y solo faltan las skills
+ozali install-skill  # instala skills del pool de grill (Matt Pocock) en el scope indicado
 ozali workspace      # multi-repo: escanea la carpeta raíz, remedia init/calibración y cablea la config conjunta
 ozali doctor         # health-check read-only (fuente de verdad, Engram, Cloud, versión de cdk, Strict TDD, frontmatters model:…)
 ozali update         # actualiza skills + permisos; avisa si cdk quedó atrás; detecta Engram y skills globales
@@ -92,6 +93,27 @@ ozali audit          # navega/audita la memoria de Engram del proyecto (o genera
 **ese proyecto** o **general** (todos los proyectos); fuera de un repo va directo a general. Usa
 `--tui` para el navegador interactivo, `--search "<texto>"` para buscar y `--general` para forzar el
 alcance. Sin Engram, audita el histórico local de `.ozali/docs/`.
+
+### `ozali install-skill` — pool de grill
+
+`ozali` trae en su paquete un pool de skills de **grilling** de Matt Pocock
+([mattpocock/skills](https://github.com/mattpocock/skills)) para afinar el **alcance, detalle y
+visión** de un proyecto antes de escribir código: entrevistan el plan en rondas hasta cerrar todas
+las ramas del árbol de decisiones, y `grill-with-docs` además materializa el modelo de dominio en
+`CONTEXT.md` y ADRs.
+
+```bash
+ozali install-skill --list                # lista el pool
+ozali install-skill grill                 # instala el set completo (global, ambos agentes)
+ozali install-skill grill-with-docs       # una skill puntual
+ozali install-skill grill --scope project # en el repo actual (en vez de global)
+ozali install-skill grill --agent opencode
+```
+
+Pool: `grill-me` (entrevista de planes/decisiones), `grilling` (primitiva reutilizable),
+`grill-with-docs` (entrevista + `CONTEXT.md` y ADRs), `domain-modeling` (glosario y ADRs inline).
+Instala en `~/.claude/skills/` (Claude Code) y `~/.config/opencode/skills/` (opencode) cuando el
+agente aplica. Reinicia tu agente después de instalar.
 
 ### Workspaces multi-repo
 
