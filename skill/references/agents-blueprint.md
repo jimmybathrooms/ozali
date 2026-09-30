@@ -112,6 +112,10 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
   procesados, y timestamp (`last_updated`). Esto permite reanudar la ejecución si el agente se
   interrumpe. El helper `writeSessionState()` / `readSessionState()` está disponible en el CLI
   (`commands.mjs`).
+- **Desechables (contrato v8):** todo archivo temporal (sondas, pruebas de descarte, salidas) se crea en
+  `.ozali/tmp/<hito>/` o en el scratchpad de la sesión. Si debe vivir en el árbol (p. ej. `src/test/**`),
+  se registra en `.ozali/tmp/<hito>/manifest.json` al crearlo. Nunca se borra con `rm`: lo limpia
+  `ozali clean --hito <slug> --yes` al cierre.
 - **Entrada:** tarea con criterios. **Salida:** diffs/código.
 - **Herramientas:** edición de código (Read, Edit, Write) + ejecución acotada.
 
@@ -152,6 +156,8 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
 - **Misión:** validar que el cambio cumple los criterios de aceptación.
 - **Responsabilidades:** ejecuta pruebas unitarias (p. ej. Karma) y/o e2e; verifica
   regresiones; reporta resultados. Reutiliza/heredar de `.ai/agents/tester.md` si existe.
+- **Desechables (contrato v8):** mismas reglas que executioners: `.ozali/tmp/<hito>/` o scratchpad, con
+  `manifest.json` para lo que deba vivir en el árbol; el reporte de pruebas lista los que quedaron.
 - **Entrada:** código de executioners + criterios del owner. **Salida:** reporte de pruebas
   (pass/fail + evidencia).
 - **Herramientas:** ejecución de pruebas (Read, Bash/PowerShell acotado).

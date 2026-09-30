@@ -10,6 +10,19 @@ _No hay pendientes abiertos. Histórico de cierres en `git log -- docs/pendiente
 
 Cerrados recientemente:
 
+- **P-008** · `ozali state read|clear|write --hito --fase`: expone los helpers de estado de sesión;
+  `clear` solo puede borrar `.ozali/.session-state.json` y no acepta rutas. Salida sin banner para
+  que cdk parsee el JSON. Release v0.22.0.
+- **P-009** · `init`/`update` suman `Write`/`Edit(.ozali/docs/**)` y `Write(.ozali/.session-state.json)`
+  (`Bash(ozali *)` y `Bash(engram *)` ya existían) e ignoran `.ozali/tmp/`; `doctor` gana *Permisos de
+  cierre* (deny de `rm` sin `ozali` permitido) y *Desechables de hitos*. El deny de `rm` no se toca.
+- **P-010** · `ozali clean --hito <slug>`: dry-run por defecto, `--yes` aplica; borra
+  `.ozali/tmp/<hito>/` y el `manifest.json`, con `realpath`, allowlist (`.ozali/tmp/`, `src/test/`,
+  más `clean.allow`), rechazo de rastreados por git y exit≠0 con rechazos.
+- **P-011** · Contrato cdk **v8** (`cdk-contract.md`): cierre con Write, un comando por acción,
+  `ozali state clear` + `ozali clean --yes`, convención `.ozali/tmp/<hito>/` + `manifest.json` para
+  `tester`/`executioners`, fallback para CLI anterior y migración v7 → v8. Propagado a SKILL,
+  engram-convention §4.5, agents-blueprint y doc-templates.
 - **P-004** · Verificador de citas por **contenido**, no solo rango: cada afirmación debe tener al
   menos un identificador en su rango citado; las ausencias exigen comando de búsqueda. Paso fijo
   del blueprint §9.1 antes del GATE. Commit pendiente de este hito.

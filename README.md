@@ -14,6 +14,7 @@
 
 | Versión | Novedad |
 |---------|---------|
+| **v0.22.0** | **Cierre de hito sin abrir `rm` (P-008..P-011)**: nuevos comandos **`ozali state`** (`read` / `clear` / `write --hito --fase`) y **`ozali clean --hito <slug>`** (dry-run por defecto; borra `.ozali/tmp/<hito>/` y lo registrado en el `manifest.json`, con `realpath`, allowlist y rechazo de archivos rastreados por git). `init`/`update` suman `Write`/`Edit(.ozali/docs/**)` y `Write(.ozali/.session-state.json)` y ignoran `.ozali/tmp/`; **`doctor`** gana las filas *Permisos de cierre* y *Desechables de hitos*. **Contrato cdk v8**: el cierre usa Write (no heredocs), un comando por acción, `ozali state clear` + `ozali clean --yes` y fallbacks para CLI anterior; una `cdk` v7 aparece como desactualizada y se migra sola con la skill `ozali`. 28 tests nuevos. |
 | **v0.21.0** | **`install-skill`: pool de grill (Matt Pocock) integrado al paquete**: nuevo comando **`ozali install-skill`** instala las skills de *grilling* de Matt Pocock —`grill-me`, `grilling`, `grill-with-docs`, `domain-modeling`— para afinar **alcance, detalle y visión** del proyecto antes de escribir código (entrevistan el plan en rondas; `grill-with-docs` además escribe `CONTEXT.md` y ADRs). El pool vive en `skill-grill/` del paquete y se incluye en el tarball npm. El comando respeta `--scope` (global por defecto, project) y `--agent` (claude-code / opencode / both), instala en `~/.claude/skills/` y `~/.config/opencode/skills/`, con `--list` para ver el pool y el alias `grill` para el set completo. README documenta el uso; 3 tests nuevos en el smoke suite. |
 | **v0.20.0** | **Verificador de citas por contenido + `doctor` avisa la deriva de `business/`**: cierre de P-004..P-007 del POC de reglas de negocio. El verificador de la Fase 2.5 ya no comprueba solo que `archivo:línea` exista: cada afirmación debe tener un **identificador real** (clase, método, campo, literal) en el rango citado, y las **ausencias** ("no valida", "no se llama") exigen el comando de búsqueda que las respalda. **Regla dura anti-cuantificadores**: "ninguno/siempre/en ningún" solo con conteo ejecutado citado (sin él, forma acotada). Nuevas **fuentes de extracción** en el blueprint: anotaciones de entidad (`updatable`, `nullable`, `@Convert`), utilidades de asignación (`Values.getValue`, patch) y olores con efecto de negocio (`setStatus` fijo que reactiva, `save()` duplicado). El modo **actualizar** (`ozali --business`) reporta el **% de citas vivas** y la lista de rotas como primer paso, y **`ozali doctor`** gana la fila **`Reglas de negocio`**: compara el commit base del pie del `README.md` de `business/` contra `HEAD` y, con deriva >20% de archivos fuente, sugiere `ozali --business`. |
 | **v0.19.0** | **Reglas de negocio en la fuente de verdad (`.ai/business/`) + contrato `cdk` v7**: nueva **Fase 2.5** de la skill `ozali` que, si el repo no tiene `business/`, **pregunta** si extraerla: dominio y estados, reglas codificadas en servicios, mapa de validaciones, políticas de acceso, glosario y flujos del dominio. Nuevo modo **`/ozali --business`** para correrla a mano o **actualizarla** (revalida cada cita `archivo:línea` contra el código, extrae solo el delta y preserva lo que escribió negocio), sin regenerar `cdk`. Regla anti-inferencia: el extractor documenta lo que el código **hace** y marca como `PROVISIONAL` —con una pregunta para negocio— lo que no está confirmado. Con el **contrato v7**, los 8 subagentes de `cdk` consumen `business/` si existe (el analyzer lista las *reglas de negocio afectadas*, los executioners respetan el mapa de validaciones, el documenter la mantiene al día); `ozali update` + la skill `ozali` migran los `cdk` existentes de forma automática. Guía en [business-blueprint.md](skill/references/business-blueprint.md). |
@@ -88,7 +89,30 @@ ozali doctor         # health-check read-only (fuente de verdad, Engram, Cloud, 
 ozali update         # actualiza skills + permisos; avisa si cdk quedó atrás; detecta Engram y skills globales
 ozali sync           # lleva el histórico (docs + Engram) al repo de conocimiento de equipo
 ozali audit          # navega/audita la memoria de Engram del proyecto (o general)
+ozali state          # estado de sesión de un hito cdk: read | clear | write --hito <slug> --fase <fase>
+ozali clean          # borra los desechables de un hito (dry-run por defecto; --yes aplica)
 ```
+
+### `ozali state` y `ozali clean` — cerrar un hito sin abrir `rm`
+
+Un `deny: Bash(rm *)` en tus permisos rechaza el cierre de un hito si incluye un `rm`, y un `allow`
+no le gana a un `deny`. En vez de aflojar `rm`, el permiso se da sobre el CLI (`Bash(ozali *)`, que
+`init`/`update` ya agregan):
+
+```bash
+ozali state write --hito mi-hito --fase execution_done   # persiste la fase (con rama y last_updated)
+ozali state read                                         # JSON del estado, o null si no hay
+ozali state clear                                        # borra SOLO .ozali/.session-state.json
+ozali clean --hito mi-hito                               # dry-run: lista lo que borraría
+ozali clean --hito mi-hito --yes                         # borra .ozali/tmp/mi-hito/ + lo del manifiesto
+```
+
+`clean` borra únicamente `.ozali/tmp/<hito>/` y los archivos que el hito registró en su
+`manifest.json` (`{"hito": "…", "files": ["ruta/relativa"]}`). Rechaza rutas con `..`, symlinks que
+salgan del repo, archivos rastreados por git y todo lo que no esté bajo la allowlist
+(`.ozali/tmp/` y `src/test/`; amplíala con `clean.allow` en `.ozali/config.json`); con rechazos sale
+distinto de cero. `ozali doctor` avisa de desechables pendientes y de un deny de `rm` sin `ozali`
+permitido.
 
 `ozali audit` recorre lo que el equipo ha acumulado en Engram: dentro de un repo propone auditar
 **ese proyecto** o **general** (todos los proyectos); fuera de un repo va directo a general. Usa

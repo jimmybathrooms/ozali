@@ -503,6 +503,13 @@ Solo tras la aprobación de la Fase 5. Genera:
        Si diffieren → **ignorar** el estado (tratar como hito nuevo). Si hay un hito pendiente
        (fase ≠ `completed`) y la rama coincide, preguntar al usuario si desea reanudar desde
        la fase encontrada;
+    - **cierre sin permisos amplios (contrato v8):** escribir los docs con Write/Edit (no heredocs),
+      **un comando por acción** (nunca `rm`+`engram`+`cat >` juntos), persistir cada fase con
+      `ozali state write --hito <slug> --fase <fase>` y, al llegar a `completed`, correr
+      `ozali state clear` y `ozali clean --hito <slug> --yes` (registrar el resultado en `05`). Los
+      desechables de `tester`/`executioners` viven en `.ozali/tmp/<hito>/` (o el scratchpad), con
+      `manifest.json` si deben estar en el árbol. Si el CLI es anterior: sobrescribir el estado con
+      `{"fase":"completed"}` vía Write y **listar** los desechables al usuario; nunca intentar `rm`;
     - en el **cierre del hito**, invocar la skill **`ozali-commit`** (instalada por el CLI en
       `.claude/skills/ozali-commit/`; **nunca** `copsis-commit`, nombre heredado de versiones
       anteriores) para generar el commit summary (feature→`feat`, bugfix→`fix`, hotfix→`hotfix`,
@@ -557,7 +564,7 @@ dentro del `SKILL.md` de `cdk` que genera en la Fase 6.
   documenta y se revisa en el PR) **y** se sincroniza al repo de conocimiento aislado
   (ver [team-history](../docs/team-history.md)).
   > No agregues `.ozali/docs/` al `.gitignore`: lo que queda fuera del repo es solo el ruido local
-  > (`.ozali/backups/`, `.ozali/.session-state.json`). `ozali init`/`update` retiran esa regla si
+  > (`.ozali/backups/`, `.ozali/.session-state.json`, `.ozali/tmp/`). `ozali init`/`update` retiran esa regla si
   > una corrida vieja la escribió.
 - **Carpeta por hito:** `<hito>/` — slug corto y descriptivo (ej. `alta-componente-cobranza`).
   Si ya existe, agrega sufijo `-2`, `-3`, …

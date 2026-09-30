@@ -265,7 +265,10 @@ tolerante a fallos de red.
   usa el más reciente (`last_updated`).
 - **Guard de rama:** al leer `.session-state.json`, comparar `rama` contra la rama actual.
   Si diffieren → **ignorar** el archivo (tratar como hito nuevo).
-- Al cerrar el hito (`completed`), el orchestrator **borra** `.session-state.json`.
+- Al cerrar el hito (`completed`), el orchestrator **borra** `.session-state.json` con
+  `ozali state clear` (contrato v8; nunca con `rm`, que el `deny` de permisos suele bloquear). Si el CLI
+  es anterior, lo **sobrescribe** con `{"fase":"completed"}` vía Write. Las fases intermedias se
+  persisten con `ozali state write --hito <slug> --fase <fase>` y se leen con `ozali state read`.
 - Si no hay Engram (modo `docs`), este archivo es la **única fuente de reanudación**.
 
 ---

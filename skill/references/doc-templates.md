@@ -260,6 +260,8 @@ usuario, en:
 - ...
 
 ## Cierre del ciclo
+- **Limpieza (contrato v8):** resultado de `ozali state clear` y de `ozali clean --hito <slug> --yes`
+  (borrados / rechazados). Si el CLI es anterior, lista de desechables pendientes para el usuario.
 - **Fin:** <yyyy-mm-dd HH:MM:SS>
 - **Iteraciones executioner⇄tester:** <n>
 - **Desvíos relevantes vs. plan aprobado:** <resumen / "ninguno">

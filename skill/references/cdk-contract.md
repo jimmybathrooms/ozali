@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 7 -->
+<!-- CDK_CONTRACT_VERSION: 8 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `7`**
+> **Versión de contrato vigente: `8`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -276,3 +276,48 @@ Un `cdk` conforme a la v7 debe cumplir TODO lo de la v1–v6, más:
   4. Reportar al usuario qué archivos se tocaron.
 
 - Estampar `cdk_contract_version: 7` en su frontmatter.
+
+### v8 — cierre de hito sin permisos amplios (`ozali state` / `ozali clean`)
+Un `cdk` conforme a la v8 debe cumplir TODO lo de la v1–v7, más:
+
+- **Por qué:** el cierre solía ser un solo Bash compuesto (heredoc + `engram save` + `rm -f
+  .ozali/.session-state.json`). Un `deny: Bash(rm *)` —global o del proyecto— rechaza el comando
+  entero, y un `allow` no le gana a un `deny` (ni un `ask`). No se afloja el `rm`: el permiso va
+  sobre el CLI de ozali (`Bash(ozali *)`).
+- **Cierre en pasos separados, una acción por comando:**
+  1. Los docs del hito (`.ozali/docs/cdk/<hito>/`) se escriben con la herramienta **Write/Edit**,
+     nunca con heredocs de Bash.
+  2. Nunca se mezclan `rm`, `engram` y `cat >` en un mismo comando.
+  3. Cada transición de fase persiste con `ozali state write --hito <slug> --fase <fase>`
+     (`analysis_done` | `plan_approved` | `execution_done` | `testing_done` | `completed`).
+  4. Al llegar a `completed`: `ozali state clear` (solo puede borrar `.ozali/.session-state.json`).
+  5. Reanudación: `ozali state read` imprime el estado (JSON, o `null` si no hay).
+- **Desechables de prueba:** `tester` y `executioners` crean todo archivo desechable (pruebas de
+  descarte, sondas, salidas temporales) en `.ozali/tmp/<hito>/` (gitignored) o en el scratchpad de
+  la sesión. Si excepcionalmente debe vivir en el árbol (p. ej. una prueba de descarte en
+  `src/test/**` para que compile), el agente lo **registra en `.ozali/tmp/<hito>/manifest.json`**
+  (`{"hito": "<slug>", "files": ["ruta/relativa"]}`) al crearlo.
+- **Limpieza al cierre:** al pasar a `completed`, `cdk` corre `ozali clean --hito <slug>` (dry-run) y,
+  si lo listado es lo esperado, `ozali clean --hito <slug> --yes`; registra el resultado en `05`.
+  `ozali clean` rechaza rutas con `..`, symlinks que salgan del repo, archivos rastreados por git y
+  todo lo que no esté bajo la allowlist (`.ozali/tmp/`, `src/test/`, más `clean.allow` del config).
+  Con rechazos sale distinto de cero y conserva el manifiesto: `cdk` lo reporta, no lo reintenta con `rm`.
+- **Fallback si el CLI es anterior (sin `state`/`clean`):** para el estado, **sobrescribir**
+  `.ozali/.session-state.json` con `{"fase":"completed"}` usando Write (la lectura de reanudación,
+  Fase 0.1 de ozali, ya trata `fase == completed` como "sin pendiente"). Para los desechables,
+  **listarlos al usuario** en el resumen de cierre; **nunca** intentar `rm`. Si el borrado no fue
+  posible, anotarlo en la bitácora `05` sin bloquear el cierre.
+
+- **Alcance de la migración v7 → v8** (automática, sin GATE — agrega instrucciones, no cambia la
+  estructura de subagentes):
+  1. En `.claude/skills/cdk/SKILL.md`, reemplazar el paso de cierre por la secuencia de arriba
+     (Write para docs, un comando por acción, `ozali state clear`, `ozali clean --hito <slug> --yes`,
+     fallbacks).
+  2. En `.claude/agents/tester.md` y `.claude/agents/executioners.md`, agregar la convención de
+     desechables (`.ozali/tmp/<hito>/` + `manifest.json`).
+  3. Verificar que `.gitignore` tenga `.ozali/tmp/` (lo agrega `ozali update`) y sugerir `ozali update`
+     si faltan los permisos `Write(.ozali/docs/**)` / `Edit(.ozali/docs/**)` /
+     `Write(.ozali/.session-state.json)`.
+  4. Reportar al usuario qué archivos se tocaron.
+
+- Estampar `cdk_contract_version: 8` en su frontmatter.
