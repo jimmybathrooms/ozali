@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, installSkill, dashboard } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, installSkill, dashboard, stateCmd, cleanCmd } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -37,6 +37,10 @@ ${c.bold("Comandos:")}
   sync      Sincroniza el histórico (docs + Engram) con el repo de conocimiento.
   audit     Navega/audita la memoria de Engram del proyecto (o general).
   cloud     Gestiona Engram Cloud: status, upgrade, repair, dashboard, config.
+  state     Estado de sesión de un hito cdk (.ozali/.session-state.json): read | clear |
+            write --hito <slug> --fase <fase>. Permite cerrar un hito sin usar rm.
+  clean     Borra los desechables de un hito (.ozali/tmp/<hito>/ y lo del manifiesto) sin rm.
+            Dry-run por defecto; --yes aplica. Uso: ozali clean --hito <slug> [--yes].
   dashboard Genera un resumen agregado de todos los hitos CDK documentados
             (.ozali/dashboard.md) con métricas de uso y telemetría.
 
@@ -58,6 +62,8 @@ ${c.bold("Opciones comunes:")}
    --rollback           (update) Restaura skills desde su backup más reciente.
    --skills             (update) Fuerza actualización de skills aunque esté frozen.
    --list               (install-skill) Lista las skills del pool de grill.
+   --hito <slug>        (state write / clean) Slug del hito.
+   --fase <fase>        (state write) analysis_done | plan_approved | execution_done | testing_done | completed.
    --fix                (doctor) Auto-remedia problemas detectados (repo de conocimiento, TDD…).
   --import             (sync) Importa del repo de conocimiento a local.
   --push               (sync) Hace push al remoto del repo de conocimiento.
@@ -111,6 +117,8 @@ function parseArgs(argv) {
     else if (a === "--skills") opts.skills = true;
     else if (a === "--list") opts.list = true;
     else if (a === "--fix") opts.fix = true;
+    else if (a === "--hito") opts.hito = argv[++i];
+    else if (a === "--fase") opts.fase = argv[++i];
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "-v" || a === "--version") opts.version = true;
     else opts._.push(a);
@@ -127,7 +135,8 @@ async function main() {
 
   const cwd = process.cwd();
   // Banner de versión: confirma qué versión de ozali está corriendo en cada comando.
-  console.log(`${c.bold("ozali")} ${c.dim("v" + pkgVersion())}`);
+  // (`state` lo omite: su salida —JSON— la consume cdk y el banner la contaminaría.)
+  if (cmd !== "state") console.log(`${c.bold("ozali")} ${c.dim("v" + pkgVersion())}`);
   switch (cmd) {
     case "init": return await init(cwd, opts);
     case "workspace": return await workspace(cwd, opts);
@@ -137,6 +146,8 @@ async function main() {
     case "audit": return await audit(cwd, opts);
     case "cloud": return await cloud(cwd, opts);
     case "dashboard": return await dashboard(cwd, opts);
+    case "state": return await stateCmd(cwd, opts);
+    case "clean": return await cleanCmd(cwd, opts);
     case "install-skills": return await installSkills(cwd, opts);
     case "install-skill": return await installSkill(cwd, opts);
     case "install-engram": return await installEngramCmd(cwd, opts);

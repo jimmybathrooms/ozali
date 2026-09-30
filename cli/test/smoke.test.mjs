@@ -230,10 +230,10 @@ test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 7\n---\n# cdk\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 8\n---\n# cdk\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
-    assert.match(stdout, /contrato v7 \(al día\)/, "doctor marca cdk al día");
+    assert.match(stdout, /contrato v8 \(al día\)/, "doctor marca cdk al día");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -255,7 +255,7 @@ test("doctor NO marca copsis-commit si solo es mención negativa (nunca copsis-c
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 7\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 8\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
     assert.doesNotMatch(stdout, /contiene copsis-commit/, "doctor NO debe marcar copsis-commit en menciones negativas");
@@ -1374,4 +1374,368 @@ test("install-skill con nombre desconocido avisa y no instala nada", () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---- P-008: ozali state (clear / write / read) ------------------------------
+const STATE_FILE = (dir) => path.join(dir, ".ozali", ".session-state.json");
+
+test("state write + read: round-trip con rama y last_updated, sin banner", () => {
+  const dir = tmpProject();
+  try {
+    run(["state", "write", "--hito", "mi-hito", "--fase", "analysis_done"], dir);
+    const { stdout } = run(["state", "read"], dir);
+    const st = JSON.parse(stdout); // JSON puro: si el banner se cuela, esto revienta
+    assert.equal(st.hito, "mi-hito");
+    assert.equal(st.fase, "analysis_done");
+    assert.ok(st.rama, "estampa la rama actual");
+    assert.ok(st.last_updated, "estampa last_updated");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state write conserva campos previos (p. ej. archivos_procesados) al actualizar la fase", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    fs.writeFileSync(STATE_FILE(dir), JSON.stringify({ hito: "h", fase: "plan_approved", archivos_procesados: 4 }));
+    run(["state", "write", "--hito", "h", "--fase", "execution_done"], dir);
+    const st = JSON.parse(run(["state", "read"], dir).stdout);
+    assert.equal(st.fase, "execution_done");
+    assert.equal(st.archivos_procesados, 4);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state write rechaza fase inválida y hito con slug inválido", () => {
+  const dir = tmpProject();
+  try {
+    assert.notEqual(run(["state", "write", "--hito", "h", "--fase", "inventada"], dir, true).code, 0);
+    assert.notEqual(run(["state", "write", "--hito", "../x", "--fase", "completed"], dir, true).code, 0);
+    assert.notEqual(run(["state", "write", "--fase", "completed"], dir, true).code, 0, "falta --hito");
+    assert.ok(!fs.existsSync(STATE_FILE(dir)), "no escribe nada si valida mal");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state read sin estado imprime null", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(run(["state", "read"], dir).stdout.trim(), "null");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state clear borra solo .session-state.json y es idempotente", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".ozali", "config.json"), "{}");
+    fs.writeFileSync(path.join(dir, "victima.txt"), "no me borres");
+    fs.writeFileSync(STATE_FILE(dir), "{}");
+    assert.equal(run(["state", "clear"], dir).code, 0);
+    assert.ok(!fs.existsSync(STATE_FILE(dir)));
+    assert.ok(fs.existsSync(path.join(dir, ".ozali", "config.json")), "no toca el resto de .ozali/");
+    assert.equal(run(["state", "clear"], dir).code, 0, "segunda vez: sin estado, sin error");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state clear no acepta rutas: un argumento extra se rechaza y no borra nada", () => {
+  const dir = tmpProject();
+  try {
+    fs.writeFileSync(path.join(dir, "victima.txt"), "no me borres");
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    fs.writeFileSync(STATE_FILE(dir), "{}");
+    const r = run(["state", "clear", "victima.txt"], dir, true);
+    assert.notEqual(r.code, 0);
+    assert.ok(fs.existsSync(path.join(dir, "victima.txt")));
+    assert.ok(fs.existsSync(STATE_FILE(dir)), "ante duda no borra");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state con subcomando desconocido falla", () => {
+  const dir = tmpProject();
+  try {
+    assert.notEqual(run(["state", "borrar-todo"], dir, true).code, 0);
+    assert.notEqual(run(["state"], dir, true).code, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- P-010: ozali clean (borrado acotado por manifiesto) --------------------
+function writeFileIn(dir, rel, body = "x") {
+  const p = path.join(dir, rel);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, body);
+  return p;
+}
+function writeManifest(dir, hito, files) {
+  writeFileIn(dir, `.ozali/tmp/${hito}/manifest.json`, JSON.stringify({ hito, files }));
+}
+function gitCommitAll(dir) {
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], { cwd: dir });
+}
+
+test("clean sin .ozali/tmp/<hito> no tiene nada que limpiar y sale 0", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(run(["clean", "--hito", "h1"], dir).code, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean es dry-run por defecto: lista lo que borraría y no borra nada", () => {
+  const dir = tmpProject();
+  try {
+    writeFileIn(dir, ".ozali/tmp/h1/sonda.txt");
+    writeFileIn(dir, "src/test/DescarteTest.java");
+    writeManifest(dir, "h1", ["src/test/DescarteTest.java"]);
+    const r = run(["clean", "--hito", "h1"], dir);
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /sonda\.txt/);
+    assert.match(r.stdout, /DescarteTest\.java/);
+    assert.ok(fs.existsSync(path.join(dir, ".ozali/tmp/h1/sonda.txt")));
+    assert.ok(fs.existsSync(path.join(dir, "src/test/DescarteTest.java")));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean --yes borra el dir del hito y los archivos del manifiesto, y nada más", () => {
+  const dir = tmpProject();
+  try {
+    writeFileIn(dir, ".ozali/tmp/h1/sonda.txt");
+    writeFileIn(dir, ".ozali/tmp/h1/sub/otra.txt");
+    writeFileIn(dir, ".ozali/tmp/otro-hito/queda.txt");
+    writeFileIn(dir, "src/test/DescarteTest.java");
+    writeFileIn(dir, "src/test/Otro.java");
+    writeManifest(dir, "h1", ["src/test/DescarteTest.java"]);
+    const r = run(["clean", "--hito", "h1", "--yes"], dir);
+    assert.equal(r.code, 0);
+    assert.ok(!fs.existsSync(path.join(dir, ".ozali/tmp/h1")), "el dir del hito desaparece");
+    assert.ok(!fs.existsSync(path.join(dir, "src/test/DescarteTest.java")));
+    assert.ok(fs.existsSync(path.join(dir, "src/test/Otro.java")), "lo no listado sobrevive");
+    assert.ok(fs.existsSync(path.join(dir, ".ozali/tmp/otro-hito/queda.txt")), "otro hito intacto");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean con manifiesto vacío borra solo el dir del hito", () => {
+  const dir = tmpProject();
+  try {
+    writeFileIn(dir, "src/test/Queda.java");
+    writeManifest(dir, "h1", []);
+    assert.equal(run(["clean", "--hito", "h1", "--yes"], dir).code, 0);
+    assert.ok(!fs.existsSync(path.join(dir, ".ozali/tmp/h1")));
+    assert.ok(fs.existsSync(path.join(dir, "src/test/Queda.java")));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean rechaza rutas con .. y rutas absolutas (exit≠0) sin tocar la víctima", () => {
+  const dir = tmpProject();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-outside-"));
+  try {
+    const victima = writeFileIn(outside, "victima.txt");
+    writeFileIn(dir, "src/test/Valido.java");
+    writeManifest(dir, "h1", ["src/test/../../../../" + victima.replace(/^\//, ""), victima, "src/test/Valido.java"]);
+    const r = run(["clean", "--hito", "h1", "--yes"], dir, true);
+    assert.notEqual(r.code, 0);
+    assert.ok(fs.existsSync(victima), "la víctima fuera del repo sigue ahí");
+    assert.ok(!fs.existsSync(path.join(dir, "src/test/Valido.java")), "lo válido sí se borra");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("clean rechaza un symlink que apunta fuera del repo", () => {
+  const dir = tmpProject();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-outside-"));
+  try {
+    const victima = writeFileIn(outside, "victima.txt");
+    fs.mkdirSync(path.join(dir, ".ozali/tmp/h1"), { recursive: true });
+    fs.symlinkSync(victima, path.join(dir, ".ozali/tmp/h1/enlace"));
+    fs.symlinkSync(outside, path.join(dir, ".ozali/tmp/h1/enlace-dir"));
+    const r = run(["clean", "--hito", "h1", "--yes"], dir, true);
+    assert.notEqual(r.code, 0);
+    assert.ok(fs.existsSync(victima), "el destino del symlink no se toca");
+    assert.ok(fs.existsSync(path.join(outside, "victima.txt")));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("clean rechaza un archivo rastreado por git aunque esté en el manifiesto", () => {
+  const dir = tmpProject();
+  try {
+    writeFileIn(dir, "src/test/Aprobado.java", "trabajo aprobado");
+    gitCommitAll(dir);
+    writeManifest(dir, "h1", ["src/test/Aprobado.java"]);
+    const r = run(["clean", "--hito", "h1", "--yes"], dir, true);
+    assert.notEqual(r.code, 0);
+    assert.match(r.stdout, /rastreado/i);
+    assert.ok(fs.existsSync(path.join(dir, "src/test/Aprobado.java")));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean rechaza archivos fuera de la allowlist y directorios en el manifiesto", () => {
+  const dir = tmpProject();
+  try {
+    writeFileIn(dir, "src/main/Prod.java");
+    writeFileIn(dir, "README.md");
+    writeFileIn(dir, "src/test/dir/Adentro.java");
+    writeManifest(dir, "h1", ["src/main/Prod.java", "README.md", "src/test/dir"]);
+    const r = run(["clean", "--hito", "h1", "--yes"], dir, true);
+    assert.notEqual(r.code, 0);
+    for (const f of ["src/main/Prod.java", "README.md", "src/test/dir/Adentro.java"]) {
+      assert.ok(fs.existsSync(path.join(dir, f)), `${f} sigue ahí`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean rechaza un slug de hito inválido", () => {
+  const dir = tmpProject();
+  try {
+    assert.notEqual(run(["clean", "--hito", "../x", "--yes"], dir, true).code, 0);
+    assert.notEqual(run(["clean", "--yes"], dir, true).code, 0, "falta --hito");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean.allow en config amplía la allowlist; entradas peligrosas se ignoran", () => {
+  const dir = tmpProject();
+  try {
+    writeFileIn(dir, "tests/Sonda.py");
+    writeFileIn(dir, "README.md");
+    writeFileIn(dir, ".ozali/config.json", JSON.stringify({ clean: { allow: ["tests/", ".", "/", "../"] } }));
+    writeManifest(dir, "h1", ["tests/Sonda.py", "README.md"]);
+    const r = run(["clean", "--hito", "h1", "--yes"], dir, true);
+    assert.notEqual(r.code, 0, "README.md sigue fuera: '.' no abre todo el repo");
+    assert.ok(!fs.existsSync(path.join(dir, "tests/Sonda.py")), "tests/ sí quedó permitido");
+    assert.ok(fs.existsSync(path.join(dir, "README.md")));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean sin repo git solo borra bajo .ozali/tmp/", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-nogit-"));
+  try {
+    writeFileIn(dir, "src/test/Sonda.java");
+    writeFileIn(dir, ".ozali/tmp/h1/a.txt");
+    writeManifest(dir, "h1", ["src/test/Sonda.java"]);
+    const r = run(["clean", "--hito", "h1", "--yes"], dir, true);
+    assert.notEqual(r.code, 0, "no puede verificar el rastreo → rechaza lo de fuera de tmp");
+    assert.ok(fs.existsSync(path.join(dir, "src/test/Sonda.java")));
+    assert.ok(!fs.existsSync(path.join(dir, ".ozali/tmp/h1/a.txt")));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- P-009: permisos acotados, .gitignore y filas de doctor -----------------
+const INIT_ARGS = ["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project"];
+
+test("init agrega permisos acotados de cierre (Write/Edit de docs y state) y ninguno toca rm", () => {
+  const dir = tmpProject();
+  try {
+    run([...INIT_ARGS, "--knowledge-repo", path.join(dir, ".k")], dir);
+    const { allow, deny } = JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.json"), "utf8")).permissions;
+    for (const r of ["Write(.ozali/docs/**)", "Edit(.ozali/docs/**)", "Write(.ozali/.session-state.json)", "Bash(ozali *)"]) {
+      assert.ok(allow.includes(r), `allow incluye ${r}`);
+    }
+    assert.ok(!allow.some((r) => /^Bash\(rm\b/.test(r)), "ningún allow habilita rm");
+    assert.ok(!deny.some((r) => r === "Bash(rm *)"), "el template no impone ni quita el deny global de rm");
+    assert.ok(deny.includes("Bash(rm -rf *)"), "el deny de rm -rf sigue");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("update añade los permisos de cierre a un settings previo sin duplicar ni pisar reglas propias", () => {
+  const dir = tmpProject();
+  try {
+    run([...INIT_ARGS, "--knowledge-repo", path.join(dir, ".k")], dir);
+    const sp = path.join(dir, ".claude", "settings.json");
+    const cfg = JSON.parse(fs.readFileSync(sp, "utf8"));
+    cfg.permissions.allow = cfg.permissions.allow.filter((r) => !/^(Write|Edit)\(\.ozali/.test(r)).concat("Bash(mi-regla *)");
+    fs.writeFileSync(sp, JSON.stringify(cfg));
+    run(["update"], dir);
+    run(["update"], dir);
+    const { allow } = JSON.parse(fs.readFileSync(sp, "utf8")).permissions;
+    assert.ok(allow.includes("Write(.ozali/.session-state.json)"));
+    assert.ok(allow.includes("Bash(mi-regla *)"), "conserva reglas del usuario");
+    assert.equal(allow.filter((r) => r === "Edit(.ozali/docs/**)").length, 1, "idempotente");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("init e update ignoran .ozali/tmp/ (desechables de hitos) sin duplicar", () => {
+  const dir = tmpProject();
+  try {
+    run([...INIT_ARGS, "--knowledge-repo", path.join(dir, ".k")], dir);
+    run(["update"], dir);
+    const gi = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
+    assert.equal(gi.match(/^\.ozali\/tmp\/$/gm).length, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("doctor: 'Permisos de cierre' avisa si el deny de rm está activo y ozali no está permitido", () => {
+  const dir = tmpProject();
+  try {
+    const home = homeFor(dir);
+    fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(rm *)"] } }));
+    const r = run(["doctor"], dir, true);
+    assert.match(r.stdout, /Permisos de cierre/);
+    assert.match(r.stdout, /ozali update/, "sugiere el camino (no aflojar el deny)");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("doctor: 'Permisos de cierre' en verde si el deny de rm convive con Bash(ozali *)", () => {
+  const dir = tmpProject();
+  try {
+    const home = homeFor(dir);
+    fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(rm *)"], allow: ["Bash(ozali *)"] } }));
+    const line = run(["doctor"], dir, true).stdout.split("\n").find((l) => l.includes("Permisos de cierre"));
+    assert.ok(line && line.includes("✔"), line);
+    assert.match(line, /ozali state/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("doctor: 'Desechables de hitos' lista .ozali/tmp/<hito>/ con contenido y apunta a ozali clean", () => {
+  const dir = tmpProject();
+  try {
+    writeFileIn(dir, ".ozali/tmp/h-pendiente/sonda.txt");
+    fs.mkdirSync(path.join(dir, ".ozali/tmp/h-vacio"), { recursive: true });
+    const line = run(["doctor"], dir, true).stdout.split("\n").find((l) => l.includes("Desechables de hitos"));
+    assert.ok(line && line.includes("✖"), line);
+    assert.match(line, /h-pendiente/);
+    assert.match(line, /ozali clean --hito h-pendiente/);
+    assert.doesNotMatch(line, /h-vacio/, "un dir vacío no es pendiente");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("doctor: 'Desechables de hitos' en verde sin .ozali/tmp/", () => {
+  const dir = tmpProject();
+  try {
+    const line = run(["doctor"], dir, true).stdout.split("\n").find((l) => l.includes("Desechables de hitos"));
+    assert.ok(line && line.includes("✔"), line);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- P-011: contrato cdk v8 (cierre sin permisos amplios) -------------------
+test("doctor marca una cdk v7 como desactualizada frente al contrato v8", () => {
+  const dir = tmpProject();
+  try {
+    initRepo(dir);
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 7\n---\n# cdk\n");
+    const line = run(["doctor"], dir, true).stdout.split("\n").find((l) => l.includes("Skill cdk"));
+    assert.ok(line.includes("✖"), line);
+    assert.match(line, /contrato v7 < v8/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("cdk-contract.md declara la v8 con el cierre por ozali state / ozali clean y su migración", () => {
+  const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "cdk-contract.md"), "utf8");
+  assert.match(txt, /CDK_CONTRACT_VERSION:\s*8/);
+  const v8 = txt.slice(txt.indexOf("### v8"));
+  assert.ok(v8.length > 10, "hay sección ### v8");
+  for (const needle of ["ozali state clear", "ozali clean --hito", ".ozali/tmp/", "manifest.json", "heredoc", "v7 → v8", "fase\":\"completed"]) {
+    assert.ok(v8.includes(needle), `la sección v8 menciona ${needle}`);
+  }
+});
+
+test("la skill y sus referencias no mandan a borrar el state con rm y sí a ozali state clear", () => {
+  const read = (f) => fs.readFileSync(path.join(PKG_ROOT, "skill", f), "utf8");
+  assert.match(read("references/engram-convention.md"), /ozali state clear/);
+  assert.match(read("SKILL.md"), /ozali state clear/);
+  assert.match(read("SKILL.md"), /ozali clean --hito/);
+  assert.match(read("references/agents-blueprint.md"), /\.ozali\/tmp\/<hito>\//);
+  assert.match(read("references/doc-templates.md"), /ozali clean/);
 });

@@ -30,6 +30,7 @@ const GITIGNORE_ENTRIES = [
   ".ozali/backups/",
   ".ozali/.session-state.json",
   ".ozali/metrics/",
+  ".ozali/tmp/",   // desechables de hitos (P-010): los borra `ozali clean`, nunca se versionan
   ".engram/",
 ];
 
@@ -1152,6 +1153,9 @@ const CLAUDE_PERMS = {
     "Bash(go *)", "Bash(mvn *)", "Bash(java *)",
     "Bash(git status)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)", "Bash(git commit *)",
     "Bash(ozali *)", "Bash(engram *)",
+    // Cierre de hito sin permisos amplios (P-009): docs del hito y state de sesión con la herramienta
+    // Write/Edit. Ninguna regla toca `rm`: el borrado pasa por `ozali state clear` / `ozali clean`.
+    "Write(.ozali/docs/**)", "Edit(.ozali/docs/**)", "Write(.ozali/.session-state.json)",
     "PowerShell(python *)", "PowerShell(node *)", "PowerShell(npm *)", "PowerShell(npx *)",
     "PowerShell(mvn *)", "PowerShell(java *)",
   ],
@@ -1630,6 +1634,33 @@ function ensureWorkspaceJarvisOpencode(root) {
 }
 
 // =========================================================== doctor ==========
+// ----------------------------------------------------- cierre de hito (P-009/P-010)
+/** Lee `permissions.{allow,deny}` de los settings de Claude Code (global, proyecto y local). */
+function closePermsStatus(cwd) {
+  const files = [path.join(HOME, ".claude", "settings.json"), path.join(cwd, ".claude", "settings.json"), path.join(cwd, ".claude", "settings.local.json")];
+  const allow = [], deny = [];
+  for (const f of files) {
+    const p = readJSON(f, {})?.permissions || {};
+    if (Array.isArray(p.allow)) allow.push(...p.allow);
+    if (Array.isArray(p.deny)) deny.push(...p.deny);
+  }
+  return {
+    rmDenied: deny.some((r) => /^Bash\(rm(?:[ :]\*)?\)$/.test(r)),
+    ozaliAllowed: allow.some((r) => r === "Bash(*)" || /^Bash\(ozali(?:[ :]\*)?\)$/.test(r)),
+  };
+}
+
+/** Hitos con desechables sin limpiar: `.ozali/tmp/<hito>/` con al menos un archivo. */
+function pendingTmpHitos(cwd) {
+  const base = path.join(cwd, ".ozali", "tmp");
+  if (!exists(base)) return [];
+  const count = (d) => fs.readdirSync(d, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? count(path.join(d, e.name)) : 1), 0);
+  return fs.readdirSync(base, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => ({ hito: e.name, files: count(path.join(base, e.name)) }))
+    .filter((h) => h.files > 0);
+}
+
 export async function doctor(cwd, opts = {}) {
   step("ozali doctor — health-check (read-only)");
   const env = detectAll(cwd);
@@ -1695,6 +1726,18 @@ export async function doctor(cwd, opts = {}) {
     }
     info("  Corrígelo con " + c.bold("ozali doctor --fix") + " o regenerando con la skill " + c.bold("ozali") + ".");
   }
+
+  // Cierre de hito (P-009): un `deny: Bash(rm *)` —global o del proyecto— rechaza el comando entero
+  // si el cierre lo incluye. No se afloja el deny: el cierre usa `ozali state clear` / `ozali clean`,
+  // y para eso `ozali` tiene que estar permitido.
+  const perms = closePermsStatus(cwd);
+  if (!perms.rmDenied) add("Permisos de cierre", true, "sin deny de rm que estorbe el cierre");
+  else if (perms.ozaliAllowed) add("Permisos de cierre", true, "deny de rm intacto; el cierre usa ozali state / ozali clean");
+  else add("Permisos de cierre", false, "hay deny de rm y `ozali` no está permitido → corre 'ozali update' (agrega Bash(ozali *)); no aflojes el deny");
+  const leftovers = pendingTmpHitos(cwd);
+  add("Desechables de hitos", leftovers.length === 0,
+    leftovers.length === 0 ? "sin desechables pendientes"
+      : leftovers.map((l) => `${l.hito} (${l.files}) → ozali clean --hito ${l.hito}`).join("; "));
 
   add("Engram", env.engram.available, env.engram.available ? env.engram.bin : "no instalado → modo docs");
   if (env.engram.available) {
@@ -3373,4 +3416,157 @@ export function clearSessionState(cwd) {
   if (exists(p)) {
     try { fs.unlinkSync(p); } catch { /* noop */ }
   }
+}
+
+// ===================================================== ozali state ===========
+// P-008: expone los helpers de arriba como subcomando para que cdk cierre un hito sin `rm` ni
+// heredocs (el `deny: Bash(rm *)` global rechaza el comando compuesto entero). El permiso se
+// da sobre `ozali`, no sobre `rm`: `clear` solo puede tocar `.ozali/.session-state.json`.
+
+const HITO_FASES = ["analysis_done", "plan_approved", "execution_done", "testing_done", "completed"];
+const HITO_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+/** Raíz del repo (para resolver `.ozali/` aunque se invoque desde una subcarpeta); cwd si no hay git. */
+function repoRoot(cwd) {
+  return tryExec("git", ["rev-parse", "--show-toplevel"], { cwd })?.trim() || cwd;
+}
+
+export async function stateCmd(cwd, opts = {}) {
+  const [, sub, ...extra] = opts._;
+  const root = repoRoot(cwd);
+  if (sub === "read" && extra.length === 0) {
+    // Salida pura (JSON o `null`): la consume cdk para reanudar.
+    console.log(JSON.stringify(readSessionState(root)));
+    return 0;
+  }
+  if (sub === "clear" && extra.length === 0) {
+    clearSessionState(root);
+    return 0;
+  }
+  if (sub === "write" && extra.length === 0) {
+    if (!opts.hito || !HITO_SLUG_RE.test(opts.hito)) { err("state write: --hito <slug> requerido (a-z, 0-9 y guiones)."); return 1; }
+    if (!HITO_FASES.includes(opts.fase)) { err(`state write: --fase debe ser una de ${HITO_FASES.join(", ")}.`); return 1; }
+    const prev = readSessionState(root) || {};
+    // `symbolic-ref` cubre el repo recién iniciado (rama sin commits), donde `rev-parse HEAD` falla.
+    writeSessionState(root, { ...prev, hito: opts.hito, fase: opts.fase, rama: gitInfo(root).branch || tryExec("git", ["symbolic-ref", "--short", "HEAD"], { cwd: root }) || prev.rama });
+    return 0;
+  }
+  err("uso: ozali state read | ozali state clear | ozali state write --hito <slug> --fase <fase>");
+  return 1;
+}
+
+// ===================================================== ozali clean ===========
+// P-010: borra los desechables de un hito (pruebas de descarte, sondas, salidas temporales) sin
+// abrir `rm`. Un `allow` no puede ganarle al `deny: Bash(rm *)`, así que el permiso va sobre el
+// CLI: lo único que se puede borrar es lo que cumple TODAS las reglas de abajo.
+
+const CLEAN_ALLOW_DEFAULT = [".ozali/tmp/", "src/test/"];
+
+/** Allowlist = defaults + `clean.allow` del config. Descarta entradas que abrirían el repo entero. */
+function cleanAllowlist(cfg) {
+  const out = [...CLEAN_ALLOW_DEFAULT];
+  const extra = Array.isArray(cfg?.clean?.allow) ? cfg.clean.allow : [];
+  for (const e of extra) {
+    const n = typeof e === "string" ? e.replace(/\\/g, "/").replace(/^\.\//, "") : "";
+    const segs = n.split("/");
+    if (!n || n === "." || n.startsWith("/") || /^[a-zA-Z]:/.test(n) || segs.includes("..") || segs[0] === ".git") {
+      warn(`clean.allow: se ignora la entrada ${JSON.stringify(e)} (debe ser un directorio relativo al repo, sin ".." ni ".git").`);
+      continue;
+    }
+    out.push(n.endsWith("/") ? n : n + "/");
+  }
+  return out;
+}
+
+/** ¿git rastrea exactamente esta ruta? `:(literal)` evita que `*` o `[` del nombre se lean como glob. */
+function gitTracksLiteral(root, rel) {
+  const out = tryExec("git", ["ls-files", "-z", "--", `:(literal)${rel}`], { cwd: root });
+  return Boolean(out && out.length);
+}
+
+export async function cleanCmd(cwd, opts = {}) {
+  const hito = opts.hito;
+  if (!hito || !HITO_SLUG_RE.test(hito)) { err("clean: --hito <slug> requerido (a-z, 0-9 y guiones)."); return 1; }
+  const root = repoRoot(cwd);
+  let realRoot;
+  try { realRoot = fs.realpathSync(root); } catch { err("clean: no se pudo resolver la raíz del repo."); return 1; }
+  const isRepo = gitInfo(root).isRepo;
+  const allow = cleanAllowlist(readMergedConfig(root));
+  const inAllow = (rel) => allow.some((a) => rel.startsWith(a));
+  const inside = (p) => { const r = path.relative(realRoot, p); return r !== "" && r !== ".." && !r.startsWith(".." + path.sep) && !path.isAbsolute(r); };
+  const toPosix = (p) => p.split(path.sep).join("/");
+
+  const hitoRel = `.ozali/tmp/${hito}`;
+  const hitoDir = path.join(root, hitoRel);
+  let hitoStat = null;
+  try { hitoStat = fs.lstatSync(hitoDir); } catch { /* no existe */ }
+  if (hitoStat && (hitoStat.isSymbolicLink() || !hitoStat.isDirectory())) { err(`clean: ${hitoRel} no es un directorio normal.`); return 1; }
+
+  const candidates = new Set();
+  const rejected = [];
+
+  // 1) Todo lo que hay bajo el dir del hito (los symlinks se tratan como archivos: no se siguen).
+  const walk = (dirAbs, relBase) => {
+    for (const d of fs.readdirSync(dirAbs, { withFileTypes: true })) {
+      const rel = `${relBase}/${d.name}`;
+      if (d.isDirectory()) walk(path.join(dirAbs, d.name), rel);
+      else candidates.add(rel);
+    }
+  };
+  if (hitoStat) walk(hitoDir, hitoRel);
+
+  // 2) Lo que el manifiesto registró como desechable fuera de .ozali/tmp/.
+  const manifestAbs = path.join(hitoDir, "manifest.json");
+  if (hitoStat && exists(manifestAbs)) {
+    let files;
+    try { files = JSON.parse(fs.readFileSync(manifestAbs, "utf8")).files; } catch { files = undefined; }
+    if (!Array.isArray(files)) { err(`clean: ${hitoRel}/manifest.json inválido (se espera {"files": [...]}).`); return 1; }
+    for (const f of files) {
+      const raw = typeof f === "string" ? f.replace(/\\/g, "/") : "";
+      if (!raw || path.posix.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) { rejected.push([String(f), "ruta vacía o absoluta"]); continue; }
+      if (raw.split("/").includes("..")) { rejected.push([raw, "contiene '..'"]); continue; }
+      candidates.add(path.posix.normalize(raw));
+    }
+  }
+
+  // 3) Cada candidato debe pasar TODAS las reglas.
+  const accepted = [];
+  for (const rel of candidates) {
+    if (!inAllow(rel)) { rejected.push([rel, "fuera de la allowlist"]); continue; }
+    if (!isRepo && !rel.startsWith(".ozali/tmp/")) { rejected.push([rel, "sin repo git no se puede verificar que no esté rastreado"]); continue; }
+    const abs = path.join(root, rel);
+    try { fs.lstatSync(abs); } catch { info(`ya no existe: ${rel}`); continue; }
+    let real;
+    try { real = fs.realpathSync(abs); } catch { rejected.push([rel, "enlace roto o ilegible"]); continue; }
+    if (!inside(real)) { rejected.push([rel, "resuelve fuera del repo"]); continue; }
+    const relReal = toPosix(path.relative(realRoot, real));
+    if (!inAllow(relReal)) { rejected.push([rel, `el enlace resuelve a ${relReal}, fuera de la allowlist`]); continue; }
+    if (!fs.statSync(real).isFile()) { rejected.push([rel, "no es un archivo"]); continue; }
+    if (isRepo && (gitTracksLiteral(root, rel) || gitTracksLiteral(root, relReal))) { rejected.push([rel, "rastreado por git (trabajo aprobado)"]); continue; }
+    accepted.push(rel);
+  }
+
+  // Con rechazos se conserva el manifiesto: es el registro de lo que quedó pendiente.
+  const keep = rejected.length ? `${hitoRel}/manifest.json` : null;
+  const toDelete = accepted.filter((r) => r !== keep);
+
+  if (toDelete.length === 0 && rejected.length === 0) { info(`clean: nada que limpiar para el hito ${hito}.`); return 0; }
+  for (const rel of toDelete) {
+    if (!opts.yes) { info(`borraría: ${rel}`); continue; }
+    try { fs.unlinkSync(path.join(root, rel)); ok(`borrado: ${rel}`); }
+    catch (e) { rejected.push([rel, `no se pudo borrar (${e.code || e.message})`]); }
+  }
+  for (const [rel, why] of rejected) warn(`rechazado: ${rel} — ${why}`);
+
+  if (opts.yes && hitoStat) {
+    // Directorios vacíos del hito, de abajo hacia arriba; rmdir falla si algo quedó (a propósito).
+    const prune = (dirAbs) => {
+      for (const d of fs.readdirSync(dirAbs, { withFileTypes: true })) if (d.isDirectory()) prune(path.join(dirAbs, d.name));
+      try { fs.rmdirSync(dirAbs); } catch { /* no vacío: se conserva */ }
+    };
+    prune(hitoDir);
+  } else if (!opts.yes) {
+    info("dry-run: no se borró nada. Repite con --yes para aplicar.");
+  }
+  return rejected.length ? 1 : 0;
 }
