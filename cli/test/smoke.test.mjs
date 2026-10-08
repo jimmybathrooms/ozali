@@ -230,10 +230,10 @@ test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 8\n---\n# cdk\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 9\n---\n# cdk\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
-    assert.match(stdout, /contrato v8 \(al día\)/, "doctor marca cdk al día");
+    assert.match(stdout, /contrato v9 \(al día\)/, "doctor marca cdk al día");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -255,7 +255,7 @@ test("doctor NO marca copsis-commit si solo es mención negativa (nunca copsis-c
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 8\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 9\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
     assert.doesNotMatch(stdout, /contiene copsis-commit/, "doctor NO debe marcar copsis-commit en menciones negativas");
@@ -1710,25 +1710,34 @@ test("doctor: 'Desechables de hitos' en verde sin .ozali/tmp/", () => {
 });
 
 // ---- P-011: contrato cdk v8 (cierre sin permisos amplios) -------------------
-test("doctor marca una cdk v7 como desactualizada frente al contrato v8", () => {
+test("doctor marca una cdk v7 como desactualizada frente al contrato v9", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
     writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 7\n---\n# cdk\n");
     const line = run(["doctor"], dir, true).stdout.split("\n").find((l) => l.includes("Skill cdk"));
     assert.ok(line.includes("✖"), line);
-    assert.match(line, /contrato v7 < v8/);
+    assert.match(line, /contrato v7 < v9/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("cdk-contract.md declara la v8 con el cierre por ozali state / ozali clean y su migración", () => {
   const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "cdk-contract.md"), "utf8");
-  assert.match(txt, /CDK_CONTRACT_VERSION:\s*8/);
-  const v8 = txt.slice(txt.indexOf("### v8"));
+  assert.match(txt, /CDK_CONTRACT_VERSION:\s*9/);
+  const v8 = txt.slice(txt.indexOf("### v8"), txt.indexOf("### v9"));
   assert.ok(v8.length > 10, "hay sección ### v8");
   for (const needle of ["ozali state clear", "ozali clean --hito", ".ozali/tmp/", "manifest.json", "heredoc", "v7 → v8", "fase\":\"completed"]) {
     assert.ok(v8.includes(needle), `la sección v8 menciona ${needle}`);
   }
+});
+
+test("las plantillas por hito exigen huella de autoría (GitHub + commit) en los 6 documentos", () => {
+  const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "doc-templates.md"), "utf8");
+  assert.match(txt, /GitHub: @<login/);
+  assert.match(txt, /hito: <slug>/);
+  assert.equal((txt.match(/\{\{ENCABEZADO_HITO\}\}\n\n#/g) || []).length, 6, "los 6 docs de hito llevan el encabezado");
+  const c = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "cdk-contract.md"), "utf8");
+  assert.ok(c.includes("### v9") && c.includes("v8 → v9"), "contrato v9 documenta la huella y su migración");
 });
 
 test("la skill y sus referencias no mandan a borrar el state con rm y sí a ozali state clear", () => {

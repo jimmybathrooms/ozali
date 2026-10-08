@@ -134,12 +134,16 @@ Identifica **quién** está corriendo `ozali` para el encabezado del registro.
 2. Complementa con la cuenta de git del repo:
    - `git config user.name`
    - `git config user.email`
+   - **usuario de GitHub** (huella obligatoria): `gh api user --jq .login`; si no hay `gh`, el
+     login del correo `<id>+<login>@users.noreply.github.com`; luego `git config github.user`;
+     si nada aplica, `N/A` (nunca lo inventes)
    - rama actual: `git rev-parse --abbrev-ref HEAD`
    - **commit actual** (para trazabilidad del histórico aislado): `git rev-parse --short HEAD`
 3. Construye el bloque de identidad que se usará en todos los documentos:
 
 ```
 Autor: <user.name> <<user.email>>
+GitHub: @<login>
 Sesión: <correo de sesión si está disponible>
 Rama: <branch>
 Commit: <short SHA>
@@ -582,7 +586,11 @@ dentro del `SKILL.md` de `cdk` que genera en la Fase 6.
      **Claude/Anthropic**; con otro proveedor deja estructura + nombre del proveedor (`N/A`).
 
 Las plantillas completas están en [`references/doc-templates.md`](references/doc-templates.md).
-Cada documento lleva el mismo encabezado de identidad (autor desde git/sesión + commit + fecha/hora).
+**Cada** documento (los 6, incluido el `01-prompt-entrada.md`) lleva el encabezado de identidad
+al inicio: autor (nombre + correo) + **usuario de GitHub** + sesión + rama + commit + fecha/hora.
+Variante y reglas en [`references/doc-templates.md`](references/doc-templates.md) § *Encabezado
+obligatorio*. Al generar el `cdk`, cablea esta regla en el `project-documenter`: **un documento
+sin encabezado de autoría está incompleto**.
 
 ---
 
@@ -688,6 +696,7 @@ Cada corrida de `ozali` produce **3 documentos `.md`** en una carpeta por corrid
 ozali.log: 26-06-27
 documento: 01-analisis
 Autor: <user.name> <<user.email>>
+GitHub: @<login>
 Sesión: <correo de sesión>
 Rama: <branch>
 Commit: <short SHA>

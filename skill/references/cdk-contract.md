@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 8 -->
+<!-- CDK_CONTRACT_VERSION: 9 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `8`**
+> **Versión de contrato vigente: `9`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -321,3 +321,24 @@ Un `cdk` conforme a la v8 debe cumplir TODO lo de la v1–v7, más:
   4. Reportar al usuario qué archivos se tocaron.
 
 - Estampar `cdk_contract_version: 8` en su frontmatter.
+
+### v9 — huella de autoría en todos los documentos
+Un `cdk` conforme a la v9 debe, además de lo de v8:
+
+- Resolver **una vez por hito** la identidad del autor y estamparla en el **encabezado de los 6
+  documentos** (`01`…`06`), incluido `01-prompt-entrada.md`: `Autor: <user.name> <<user.email>>`,
+  **`GitHub: @<login>`**, `Sesión`, `Rama`, `Commit`, `Creado`. Variante `hito:` en
+  [`doc-templates.md`](doc-templates.md) § *Encabezado obligatorio*.
+- Resolver el login de GitHub en este orden: `gh api user --jq .login` → correo
+  `<id>+<login>@users.noreply.github.com` → `git config github.user` → `N/A` (nunca inventarlo).
+- Tratar un documento sin encabezado de autoría como **incompleto** (el `project-documenter` no
+  cierra el hito con docs sin huella).
+
+- **Alcance de la migración v8 → v9** (automática, sin GATE — solo agrega instrucciones):
+  1. En `.claude/skills/cdk/SKILL.md` y `.claude/agents/project-documenter.md`, cablear la regla de
+     encabezado con `GitHub:` y `Commit:` para los 6 documentos.
+  2. **No reescribir** documentos ya generados (los `02-plan-aprobado.md` son inmutables); aplica
+     solo a hitos nuevos.
+  3. Reportar al usuario qué archivos se tocaron.
+
+- Estampar `cdk_contract_version: 9` en su frontmatter.

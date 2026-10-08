@@ -30,18 +30,50 @@ Cada corrida de `ozali` produce **3 documentos** en:
 
 ## Encabezado obligatorio (todos los documentos)
 
-Va al inicio de cada `.md`. Toma los datos de la **Fase 0** de `ozali` (identidad/git/sesión).
+Va al inicio de **cada** `.md` (los 3 de `ozali.log` y los 6 de cada hito de `cdk`), sin excepción.
+Toma los datos de la **Fase 0.2** de `ozali` (identidad/git/sesión). **La huella de autoría es
+obligatoria**: nombre, correo y **usuario de GitHub** de quien generó el documento.
+
+**Variante `ozali.log`** (3 documentos de diagnóstico):
 
 ```
 ---
 ozali.log: {{yy-mm-dd}}
 documento: 01-analisis | 02-plan | 03-mejoras
 Autor: <git user.name> <<git user.email>>
+GitHub: @<login de GitHub>
 Sesión: <correo de sesión si está disponible>
 Rama: <branch actual>
+Commit: <short SHA>
 Creado: <yyyy-mm-dd HH:MM:SS> (local)
 ---
 ```
+
+**Variante hito de `cdk`** (los 6 documentos de `.ozali/docs/cdk/<hito>/`):
+
+```
+---
+hito: <slug>
+documento: 01-prompt-entrada | 02-plan-aprobado | 03-resumen-tecnico | 04-resumen-usuario | 05-bitacora-ejecucion | 06-uso-tokens
+Autor: <git user.name> <<git user.email>>
+GitHub: @<login de GitHub>
+Sesión: <correo de sesión si está disponible>
+Rama: <branch actual>
+Commit: <short SHA>
+Creado: <yyyy-mm-dd HH:MM:SS> (local)
+---
+```
+
+**Cómo resolver `GitHub:`** (en este orden; el primero que dé resultado):
+1. `gh api user --jq .login` (si `gh` está autenticado).
+2. Del correo `noreply` de git: `<id>+<login>@users.noreply.github.com` → `<login>`.
+3. `git config github.user`.
+4. Si nada aplica, escribe `GitHub: N/A` (no inventes el usuario) y anótalo en la bitácora.
+
+> Regla: el encabezado se **resuelve una sola vez** al inicio del hito y se **reutiliza tal cual** en
+> los 6 documentos (solo cambia `documento:`). En `05-bitacora-ejecucion.md` el encabezado va una
+> vez arriba; las entradas append-only no lo repiten. En `02-plan-aprobado.md` (inmutable) el
+> encabezado se escribe junto con el snapshot.
 
 ---
 
@@ -130,12 +162,15 @@ usuario, en:
 
 - `<hito>` = slug corto y descriptivo de la solicitud (ej. `alta-componente-cobranza`,
   `fix-calculo-prima-poliza`). Si ya existe, agrega sufijo `-2`, `-3`, …
-- Cada documento usa el **mismo encabezado de identidad** de arriba (con `hito:` en lugar de
-  `ozali.log:`).
+- **Cada documento empieza con el encabezado de identidad, variante hito** (ver arriba: autor +
+  usuario de GitHub + commit). Las plantillas de abajo lo muestran como `{{ENCABEZADO_HITO}}`:
+  **sustitúyelo siempre** por el bloque `---…---` real, con `documento:` ajustado.
 
 ### 01-prompt-entrada.md — Prompt de entrada
 
 ```markdown
+{{ENCABEZADO_HITO}}
+
 # Prompt de entrada — <hito>
 
 > Captura textual de la solicitud del usuario, para evaluar el progreso de las solicitudes.
@@ -158,6 +193,8 @@ usuario, en:
 > vio el usuario, ya con su decisión.
 
 ```markdown
+{{ENCABEZADO_HITO}}
+
 # Plan aprobado — <hito>
 
 **Tipo:** feature | bugfix | hotfix | refactor      **Tamaño:** S | M | L
@@ -199,6 +236,8 @@ usuario, en:
 ### 03-resumen-tecnico.md — Resumen técnico
 
 ```markdown
+{{ENCABEZADO_HITO}}
+
 # Resumen técnico — <hito>
 
 ## Decisiones de implementación
@@ -219,6 +258,8 @@ usuario, en:
 ### 04-resumen-usuario.md — Resumen para el usuario
 
 ```markdown
+{{ENCABEZADO_HITO}}
+
 # Resumen para usuario — <hito>
 
 > Lenguaje claro, sin jerga técnica.
@@ -243,6 +284,8 @@ usuario, en:
 > diferencia entre lo planeado y lo realmente ejecutado.
 
 ```markdown
+{{ENCABEZADO_HITO}}
+
 # Bitácora de ejecución — <hito>
 
 **Modo de ejecución:** normal | --auto
@@ -275,6 +318,8 @@ usuario, en:
 > (data presente, sin inventar cifras).
 
 ```markdown
+{{ENCABEZADO_HITO}}
+
 # Uso de tokens — <hito>
 
 **Proveedor:** Claude (Anthropic) | <otro proveedor>
