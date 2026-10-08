@@ -1,7 +1,7 @@
 name: Publish (npm + provenance)
 
 # Publica a npm con provenance (sigstore) al crear un tag vX.Y.Z.
-# Requiere el secret NPM_TOKEN (Automation token) configurado en el repo.
+# Requiere el secret NPM_TOKEN (granular, Read and write sobre ozali, con bypass 2FA).
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: "https://registry.npmjs.org"
       - name: Tests antes de publicar
         run: node --test cli/test/*.test.mjs
