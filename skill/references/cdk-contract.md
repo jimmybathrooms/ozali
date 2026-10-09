@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 9 -->
+<!-- CDK_CONTRACT_VERSION: 10 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `9`**
+> **Versión de contrato vigente: `10`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -342,3 +342,31 @@ Un `cdk` conforme a la v9 debe, además de lo de v8:
   3. Reportar al usuario qué archivos se tocaron.
 
 - Estampar `cdk_contract_version: 9` en su frontmatter.
+
+### v10 — contexto manual preservado + revisor de UI (solo proyectos web)
+Un `cdk` conforme a la v10 debe, además de lo de v9:
+
+- **Preservar el contexto manual:** al regenerar o migrar, leer la lista de contexto de
+  `.ai/context/` que el `cdk` instalado ya referencia y **conservar toda entrada que no sea del set
+  base** (`architecture`, `coding-standards`, `tech-stack`), p. ej. `ui-components.md`. Nunca
+  descartar contexto agregado a mano.
+- **Si el repo es web** (Angular, React, Vue, Svelte, Next, Vite con UI…; detección en
+  [`ui-catalog-blueprint.md`](ui-catalog-blueprint.md) §1): generar el subagente
+  **`project-ui-reviewer`** (`.claude/agents/project-ui-reviewer.md`, categoría D, nivel medium,
+  solo lectura) y cablearlo en el flujo tras `executioners ⇄ tester`, solo cuando el hito toca UI.
+  Revisa hex fijos, componentes duplicados frente al catálogo y textos sin i18n.
+- **Si el repo es backend:** **no** generar el revisor ni el catálogo; los 8 roles no cambian.
+- El catálogo `.ai/context/ui-components.md` lo genera la **Fase 2.6** de `ozali` (pregunta o
+  `/ozali --ui`); **no** forma parte de la migración automática.
+
+- **Alcance de la migración v9 → v10** (automática, sin GATE — agrega instrucciones y, solo en web,
+  un subagente nuevo):
+  1. En `.claude/skills/cdk/SKILL.md`, agregar la regla de **preservación del contexto manual** y,
+     si es web, el paso de revisión de UI en el flujo.
+  2. Si el repo es **web** y falta `.claude/agents/project-ui-reviewer.md`, **generarlo** con el modelo
+     real resuelto (`agents.models.*.medium`). Esto agrega un archivo; no regenera los otros roles.
+  3. Si el repo es **backend**, no generar nada de UI: solo sellar la versión.
+  4. Si falta `.ai/context/ui-components.md` en un repo web, **sugerir** `/ozali --ui` (no generarlo).
+  5. Reportar al usuario qué archivos se tocaron.
+
+- Estampar `cdk_contract_version: 10` en su frontmatter.

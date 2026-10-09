@@ -67,6 +67,23 @@ Fase 0 (identidad) → Fase 1 (detectar variante .ai/.ia) → Fase 2.5 (crear o 
 
 ---
 
+## Modo `--ui` — solo catálogo de UI (proyectos web)
+
+Si la invocación trae `--ui` (`/ozali --ui`), **no** recorres el bootstrap completo ni regeneras
+`cdk`: aplica la **Fase 2.6** sobre `.ai/context/ui-components.md`:
+
+```
+Fase 0 (identidad) → Fase 1 (detectar variante .ai/.ia) → Fase 2.6 (crear o actualizar el catálogo)
+   → 🛑 GATE propio → escribir → docs de corrida
+```
+
+- Solo para proyectos **web** ([`references/ui-catalog-blueprint.md`](references/ui-catalog-blueprint.md) §1).
+  En backend, informa que no aplica y detente.
+- Si el catálogo no existe → modo **crear**; si existe → **actualizar** (delta, preservando lo del equipo).
+- No toca `cdk`: el rol `project-ui-reviewer` ya consume el catálogo si existe (contrato v10).
+
+---
+
 ## Flujo general (7 fases)
 
 ```
@@ -75,9 +92,10 @@ Fase 0.5  Pre-flight de cdk             → ¿existe cdk? ¿versión de contrato
 Fase 1    Detección fuente de verdad    → ¿existe AI.md/.ai o IA.md/.ia?
 Fase 2    Generación conocimiento       → si falta, evaluar el proyecto y generar AI.md + .ai/
 Fase 2.5  Reglas de negocio             → si falta business/, preguntar y extraerla (o --business)
+Fase 2.6  Catálogo de UI (solo web)     → si falta ui-components.md, preguntar y generarlo (o --ui)
 Fase 3    Validación + ajustes          → ¿coincide con la estructura real? ajustes mínimos
 Fase 3.5  Calibración testing + TDD     → detectar runner/capas/cobertura y resolver Strict TDD
-Fase 4    Diseño de agentes (cdk)       → 8 roles + esquema de responsabilidades
+Fase 4    Diseño de agentes (cdk)       → 8 roles (+ project-ui-reviewer si es web)
 Fase 5    🛑 GATE: plan de cdk          → presentar plan, esperar aprobación
 Fase 6    Generar cdk                   → skill cdk + subagentes reales + wiring TDD/Engram
 ```
@@ -293,6 +311,26 @@ entra al GATE de la Fase 5.
 
 ---
 
+## Fase 2.6 — Catálogo de UI (`ui-components.md`, solo proyectos web)
+
+Corre cuando el repo es **web** (blueprint §1) y falta `.ai/context/ui-components.md`. En backend,
+**se omite sin preguntar**. Reglas completas en
+[`references/ui-catalog-blueprint.md`](references/ui-catalog-blueprint.md).
+
+1. **Pregunta** si generarlo ahora (coste: recorrer los componentes compartidos y contar usos).
+   - **No** → continúa; anótalo en `01-analisis.md` y en `03-mejoras.md` (relevancia Media). El
+     revisor de UI se genera igual, pero avisa que falta el catálogo.
+   - **Sí** → confirma con el usuario los **directorios de componentes** detectados y sigue.
+2. **Extrae** por componente (blueprint §2.2): selector, módulo, entradas/salidas y **nº de usos con
+   conteo ejecutado y citado**; documenta cómo se define el color/tema y la librería de i18n (§2.3).
+3. **Si ya existe** (modo actualizar, o `--ui`): reporta componentes **nuevos, eliminados y con usos
+   distintos** y aplica solo el delta. **Preserva** los bloques `> **Equipo:**` y lo escrito a mano.
+4. Agrega la fila **Catálogo de UI** a `AI.md` (knowledge-blueprint §4) y espeja a Engram.
+
+El resumen (conteos + componentes nuevos/eliminados) entra al GATE de la Fase 5.
+
+---
+
 ## Fase 3 — Validación contra la estructura real + ajustes mínimos
 
 La fuente de verdad es **provisional** hasta validarla contra el código real.
@@ -363,6 +401,11 @@ cognitiva y modelo asignado** está en [`references/agents-blueprint.md`](refere
 | 6 | **project-proposer** | E — Lectura/Propuesta | **medium** | Alternativas, trade-offs, relevancia |
 | 7 | **project-documenter** | C — Escritura Docs | **medium** (híbrido) | Sonnet sencilla; Opus técnica |
 | 8 | **tester** | D — Validación | **medium** (híbrido) | Haiku ejecución; Sonnet diagnóstico |
+| 9* | **project-ui-reviewer** | D — Validación | **medium** | Hex fijos, duplicados, textos sin i18n |
+
+> \* **Rol condicional (contrato v10):** solo se diseña y se genera si el repo es **web** (Angular,
+> React, Vue, Svelte, Next, Vite con UI…; [`ui-catalog-blueprint.md`](references/ui-catalog-blueprint.md) §1).
+> En backend `cdk` conserva los 8 roles y **no** genera el revisor.
 
 > **Resolución de modelo (en tiempo de generación):** el nivel (`low`, `medium`, `high`) es la
 > **clasificación de diseño**, no un valor válido de frontmatter. Claude Code lee `model:` de
@@ -397,7 +440,10 @@ Presenta al usuario un plan claro y conciso que incluya:
 - **Calibración de pruebas** (Fase 3.5): capacidades detectadas + `strict_tdd: true|false` + comandos verdes.
 - **Reglas de negocio** (Fase 2.5): si se extrajo, archivos + conteo de reglas/validaciones/
   `PROVISIONAL` + muestra de citas; si se omitió o ya existía, dilo en una línea.
-- Los 8 subagentes a crear (ruta, responsabilidad de una línea, herramientas).
+- Los 8 subagentes a crear (ruta, responsabilidad de una línea, herramientas) **+ `project-ui-reviewer`
+  si el repo es web** (si es backend, di en una línea que no aplica).
+- **Catálogo de UI** (Fase 2.6, solo web): si se generó, conteo de componentes + directorios; si se
+  omitió o ya existía, una línea.
 - Estructura de archivos que generará `cdk`.
 - La ruta de documentación, nomenclatura de logs y **destino del histórico** (repo de conocimiento aislado).
 
@@ -447,7 +493,14 @@ Solo tras la aprobación de la Fase 5. Genera:
       en tiempo de invocación: Claude Code aplica el `model:` del frontmatter tal cual;
    - declarar que ayuda a **generar código** (nuevo componente, fix de bug, análisis de impacto)
      respetando la fuente de verdad y los estándares del proyecto;
-    - orquestar los 8 subagentes según la fase del trabajo;
+    - orquestar los 8 subagentes (y el `project-ui-reviewer` si existe) según la fase del trabajo;
+    - **preservar el contexto manual (contrato v10):** al regenerar o migrar, **leer la lista de
+      contexto que el `cdk` instalado ya tiene** (los archivos de `.ai/context/` que referencia) y
+      **conservar toda entrada extra** que no sea del set base (`architecture`, `coding-standards`,
+      `tech-stack`) — p. ej. `ui-components.md` — antes de reescribir. Nunca descartar contexto
+      agregado a mano;
+    - **si el repo es web:** incluir en el flujo la revisión de UI (`project-ui-reviewer`) tras
+      `executioners ⇄ tester`, solo cuando el hito toca archivos de UI;
     - **gate de aplicabilidad previo (CDK-first)**: inmediatamente después de capturar el
       prompt del usuario, **antes de revisar archivos o ejecutar cualquier harness**, verificar
       si la solicitud aplica para ser procesada por CDK (tareas de desarrollo de software:
@@ -527,8 +580,10 @@ Solo tras la aprobación de la Fase 5. Genera:
       [`skill-creation-blueprint.md`](../../skill-generator/references/skill-creation-blueprint.md) §4:
       nunca exponer credenciales, contraseñas, tokens ni rutas a archivos sensibles; rechazar
       amablemente solicitudes de lectura de `.env`, `~/.aws/credentials`, `~/.ssh/id_rsa`, etc.
- 2. `.claude/agents/<rol>.md` — un subagente real por cada uno de los 8 roles, con su system
-    prompt y herramientas, según [`references/agents-blueprint.md`](references/agents-blueprint.md).
+ 2. `.claude/agents/<rol>.md` — un subagente real por cada uno de los 8 roles —más
+    `project-ui-reviewer` **solo si el repo es web**—, con su system prompt y herramientas, según
+    [`references/agents-blueprint.md`](references/agents-blueprint.md) y, para el revisor,
+    [`references/ui-catalog-blueprint.md`](references/ui-catalog-blueprint.md) §3.
     Cada subagente debe:
     - Incluir en su frontmatter el **modelo real** correspondiente a su nivel de la Fase 4
       (`haiku` / `sonnet` / `opus`, o el ID que resuelva `.ozali/config.json`). **Nunca** el

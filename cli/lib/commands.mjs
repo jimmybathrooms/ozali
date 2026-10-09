@@ -13,7 +13,7 @@ import {
   projectName, pkgVersion, DEFAULT_KNOWLEDGE, HOME, openURL, gitInfo,
   toPortablePath, fromPortablePath, parseSemver, compareSemver,
 } from "./util.mjs";
-import { detectAll, detectSourceOfTruth, detectBusiness, detectWorkspace, detectReferences, findWorkspaceRootUp, detectEngramMcpServer,
+import { detectAll, detectSourceOfTruth, detectBusiness, detectWebProject, detectWorkspace, detectReferences, findWorkspaceRootUp, detectEngramMcpServer,
 } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
 
@@ -224,6 +224,7 @@ function defaultAgentsConfig() {
         "project-proposer": "medium",
         "skill-generator": "medium",
         tester: "medium",
+        "project-ui-reviewer": "medium",
         "project-documenter": "medium",
         "ozali-commit": "low",
       },
@@ -1706,6 +1707,14 @@ export async function doctor(cwd, opts = {}) {
       : cdkInfo.version == null ? "sin versión de contrato (legado) → migra con la skill 'ozali'"
       : `contrato v${cdkInfo.version} < v${cdkN} → migra con la skill 'ozali'`;
     add("Skill cdk", false, reason);
+  }
+  // Revisor de UI (contrato v10): solo aplica a proyectos web con cdk ya al día.
+  const webInfo = detectWebProject(cwd);
+  if (cdkInfo.installed && cdkInfo.version != null && cdkInfo.version >= 10 && webInfo.web) {
+    const hasReviewer = exists(path.join(cwd, ".claude", "agents", "project-ui-reviewer.md"));
+    add("Revisor de UI", hasReviewer, hasReviewer
+      ? `project-ui-reviewer presente (${webInfo.framework})`
+      : `proyecto web (${webInfo.framework}) sin .claude/agents/project-ui-reviewer.md → corre la skill 'ozali'`);
   }
   // Frontmatters `model:` — el contrato cdk v6 exige el modelo real, no el nivel abstracto.
   // Es un fallo SILENCIOSO hasta que alguien invoca la skill o el subagente, así que se chequea acá.

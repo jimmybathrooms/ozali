@@ -56,6 +56,8 @@ ecosistema del equipo ya usa esa variante).
     architecture.md       → capas/módulos REALES + diagrama de flujo (mermaid)
     coding-standards.md   → convenciones OBSERVADAS en el código + reglas de oro
     tech-stack.md         → stack, versiones exactas y comandos de build/test/run
+    ui-components.md      → (opcional, solo web, Fase 2.6) catálogo de componentes, tema e i18n —
+                            ver ui-catalog-blueprint.md
   knowledge/
     README.md             → qué es esta carpeta y cómo se alimenta
     learning-notes.md     → memoria técnica: gotchas, lecciones, decisiones (inicia con
@@ -99,6 +101,7 @@ Para detalles sobre el comportamiento de la IA en este proyecto, consulta:
 | **[Stack Tecnológico](.ai/context/tech-stack.md)** | <resumen> |
 | **[Estándares de Código](.ai/context/coding-standards.md)** | <resumen> |
 | **[Reglas de Negocio](.ai/business/README.md)** | <resumen> — solo si existe `business/` |
+| **[Catálogo de UI](.ai/context/ui-components.md)** | <resumen> — solo si es web y existe `ui-components.md` |
 | **[Log de Conocimiento](.ai/knowledge/learning-notes.md)** | Memoria técnica de la IA. |
 
 ## ⚙️ Workflow & Comandos

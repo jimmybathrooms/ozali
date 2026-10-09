@@ -39,6 +39,26 @@ export function detectBusiness(cwd, sot) {
   return { exists: true, dir, commitBase };
 }
 
+/**
+ * ¿Es un proyecto web (frontend con UI)? Contrato cdk v10: solo en web se genera el rol
+ * `project-ui-reviewer` y aplica el catálogo de UI (ui-catalog-blueprint.md §1).
+ * `vite` solo, sin framework de UI, NO cuenta. Devuelve { web, framework }.
+ */
+export function detectWebProject(cwd) {
+  if (exists(path.join(cwd, "angular.json"))) return { web: true, framework: "angular" };
+  const pkg = readJSON(path.join(cwd, "package.json"));
+  if (!pkg) return { web: false, framework: null };
+  const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  const frameworks = [
+    ["@angular/core", "angular"], ["next", "next"], ["nuxt", "nuxt"], ["react", "react"],
+    ["react-dom", "react"], ["vue", "vue"], ["svelte", "svelte"], ["solid-js", "solid"],
+  ];
+  for (const [dep, name] of frameworks) {
+    if (deps[dep]) return { web: true, framework: name };
+  }
+  return { web: false, framework: null };
+}
+
 /** Agentes presentes: claude-code y/o opencode. */
 export function detectAgents(cwd) {
   const claudeProject = exists(path.join(cwd, ".claude"));

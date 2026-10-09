@@ -1,6 +1,6 @@
 # Blueprint de agentes y subagentes para `cdk`
 
-Catálogo canónico de los **8 roles** que `cdk` materializa como **subagentes reales** de
+Catálogo canónico de los **8 roles** (más **1 condicional** para proyectos web, §9) que `cdk` materializa como **subagentes reales** de
 Claude Code (`.claude/agents/<rol>.md`). Cada subagente tiene un system prompt enfocado,
 herramientas acotadas y un contrato de entrada/salida.
 
@@ -20,6 +20,7 @@ herramientas acotadas y un contrato de entrada/salida.
 | executioners         | Cómo se implementa | Código + diffs | `.ai/context/coding-standards.md`, `.ai/business/validation-map.md` | **C — Escritura Código** | **High** |
 | project-proposer     | Alternativas y mejoras | **Doc 3**: mejoras con relevancia | `.ai/knowledge/*`, `PROVISIONAL` de `business/` | **E — Lectura/Propuesta** | **Medium** |
 | project-documenter   | Forma/registro de la salida | **Docs 01-06 por hito** con encabezado | `references/doc-templates.md` | **C — Escritura Docs** | **Medium** (híbrido: High para técnico) |
+| project-ui-reviewer *(solo web)* | Si la UI nueva respeta tema, catálogo e i18n | Reporte de revisión de UI | `.ai/context/ui-components.md`, `.ai/context/coding-standards.md` | **D — Validación** | **Medium** |
 | tester               | Si cumple criterios | Reporte de pruebas | `.ai/agents/tester.md`, `.ai/workflows/*`, `.ai/business/{rules,validation-map}.md` | **D — Validación** | **Medium** (híbrido: Low para ejecución, Medium para diagnóstico) |
 
 Flujo típico de una tarea en `cdk`:
@@ -27,7 +28,7 @@ Flujo típico de una tarea en `cdk`:
 ```
 aplicabilidad (gate CDK-first) → owner (alcance) → manager (tareas) → analyzer (impacto, Doc1)
    → orchestrator → executioners (código) ⇄ tester (pruebas)
-   → proposer (Doc3) → documenter (Docs 01-06 por hito)
+   → [ui-reviewer, solo web] → proposer (Doc3) → documenter (Docs 01-06 por hito)
 ```
 
 > El paso **aplicabilidad** es obligatorio y previo: antes de cualquier lectura de archivos,
@@ -161,6 +162,20 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
 - **Entrada:** código de executioners + criterios del owner. **Salida:** reporte de pruebas
   (pass/fail + evidencia).
 - **Herramientas:** ejecución de pruebas (Read, Bash/PowerShell acotado).
+
+### 9. project-ui-reviewer (condicional — solo proyectos web)
+- **Misión:** revisar que la UI nueva respete el tema, reutilice componentes y use i18n.
+- **Cuándo existe:** solo si el repo es **web** (Angular, React, Vue, Svelte, Next, Vite con UI…).
+  En backend **no se genera** y el flujo queda con los 8 roles. Detección y reglas completas en
+  [`ui-catalog-blueprint.md`](ui-catalog-blueprint.md) §1 y §3.
+- **Responsabilidades:** sobre lo **nuevo o modificado** del hito, detecta colores fijos
+  (`#hex`/`rgb()` en vez del tema), componentes duplicados frente al catálogo
+  `.ai/context/ui-components.md` y textos sin i18n. Reporta `archivo:línea` · regla · severidad.
+  **No edita código.**
+- **Entrada:** diff del hito + `ui-components.md` (si existe). **Salida:** reporte de revisión de UI
+  que el orchestrator integra y el documenter resume en la bitácora (`05`).
+- **Momento:** tras `executioners ⇄ tester`, solo si el hito toca archivos de UI.
+- **Herramientas:** solo lectura (Read, Grep, Glob, Bash acotado).
 
 ---
 

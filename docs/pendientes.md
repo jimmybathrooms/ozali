@@ -24,6 +24,10 @@ entrada (el histórico queda en el commit).
 
 Cerrados recientemente:
 
+- **P-013** · Contrato cdk **v10** (`catalogo-ui-revisor-web`): rol condicional `project-ui-reviewer`
+  (solo web), Fase 2.6 + `--ui` para el catálogo `ui-components.md`, preservación del contexto manual al
+  regenerar `cdk`, `detectWebProject` y fila *Revisor de UI* en `doctor`; migración v9 → v10.
+  Blueprint nuevo `ui-catalog-blueprint.md`. Release v0.24.0 (pendiente de publicar: ver P-012).
 - **P-008** · `ozali state read|clear|write --hito --fase`: expone los helpers de estado de sesión;
   `clear` solo puede borrar `.ozali/.session-state.json` y no acepta rutas. Salida sin banner para
   que cdk parsee el JSON. Release v0.22.0.
