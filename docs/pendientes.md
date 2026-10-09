@@ -6,28 +6,18 @@ entrada (el histórico queda en el commit).
 
 ---
 
-### P-012 · Publish de v0.23.0 falla con `404 Not Found` en `PUT /ozali`
-
-- **Qué está mal hoy:** el job *Publish (npm + provenance)* #38 (tag `v0.23.0`, commit `b5d2291`)
-  firma la provenance en sigstore, pero `npm publish` termina con `E404 … 'ozali@0.23.0' is not in
-  this registry`. Para un paquete ya existente (0.22.0 publicado) npm responde 404 cuando el token
-  no puede escribir. Tests y CI en verde; el tag existe y coincide con `package.json`.
-- **Descartado:** falta de permisos de la cuenta — `npm access list collaborators ozali` →
-  `jimmybaths: read-write`. El OIDC/provenance funciona (`id-token: write`).
-- **Hipótesis restantes (sobre el secret `NPM_TOKEN`):** token granular sin "Read and write" sobre
-  `ozali`, vencido/revocado, valor pegado con espacios o salto de línea, o puesto en *Environment*
-  secrets y no en *Repository* secrets (el cambio de token coincide con el commit `c51a4ee`).
-- **Qué hay que cambiar:** revisar/regenerar el token y actualizar el secret; después *Re-run failed
-  jobs* sobre `v0.23.0` (no recrear el tag). Alternativa estable: *Trusted Publishing* (OIDC) en la
-  página del paquete en npm, sin token.
-- **Cómo se verifica:** el job #38 pasa y `npm view ozali version` devuelve `0.23.0`.
+_No hay pendientes abiertos. Histórico de cierres en `git log -- docs/pendientes.md`._
 
 Cerrados recientemente:
 
+- **P-012** · Publish de v0.23.0 fallaba con `404 Not Found` en `PUT /ozali`. Causa: el secret
+  `NPM_TOKEN` no tenía permiso de escritura sobre el paquete (la cuenta sí era `read-write`; la
+  provenance firmaba bien). Se generó un token granular nuevo y, tras *Re-run failed jobs* sobre
+  `v0.23.0`, `npm view ozali version` devolvió 0.23.0. npmjs.com tardó en refrescar su caché.
 - **P-013** · Contrato cdk **v10** (`catalogo-ui-revisor-web`): rol condicional `project-ui-reviewer`
   (solo web), Fase 2.6 + `--ui` para el catálogo `ui-components.md`, preservación del contexto manual al
   regenerar `cdk`, `detectWebProject` y fila *Revisor de UI* en `doctor`; migración v9 → v10.
-  Blueprint nuevo `ui-catalog-blueprint.md`. Release v0.24.0 (pendiente de publicar: ver P-012).
+  Blueprint nuevo `ui-catalog-blueprint.md`. Release v0.24.0.
 - **P-008** · `ozali state read|clear|write --hito --fase`: expone los helpers de estado de sesión;
   `clear` solo puede borrar `.ozali/.session-state.json` y no acepta rutas. Salida sin banner para
   que cdk parsee el JSON. Release v0.22.0.
