@@ -142,6 +142,16 @@ Pool: `grill-me` (entrevista de planes/decisiones), `grilling` (primitiva reutil
 Instala en `~/.claude/skills/` (Claude Code) y `~/.config/opencode/skills/` (opencode) cuando el
 agente aplica. Reinicia tu agente después de instalar.
 
+**Skill independiente: `python-utilitario`.** Fabrica utilitarios Python autocontenidos (un solo
+`run_<nombre>.sh` con su propio `venv/`, log por corrida, `--dry-run` y códigos de salida
+estándar). No forma parte del pool de grill ni del alias `grill`; se instala aparte:
+
+```bash
+ozali install-skill python-utilitario     # por nombre
+ozali install-skill --python              # flag equivalente (alias: "python")
+ozali install-skill --python --scope project --agent claude-code
+```
+
 ### Workspaces multi-repo
 
 Cuando abres en tu editor (VSCode, **Antigravity**) una **carpeta raíz con varios repos** que se

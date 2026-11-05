@@ -1369,8 +1369,46 @@ test("install-skill con nombre desconocido avisa y no instala nada", () => {
   try {
     const { code, stdout } = run(["install-skill", "no-existe", "--agent", "claude-code", "--scope", "project"], dir, true);
     assert.equal(code, 1, "sale con código 1");
-    assert.match(stdout, /no está en el pool/, "avisa que no está en el pool");
+    assert.match(stdout, /no existe/, "avisa que la skill no existe");
     assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "no-existe")), "no instala nada");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- install-skill python-utilitario (skill independiente) -------------------
+
+test("install-skill python-utilitario instala solo esa skill, con plantillas", () => {
+  const dir = tmpProject();
+  try {
+    run(["install-skill", "python-utilitario", "--agent", "claude-code", "--scope", "project"], dir);
+    const base = path.join(dir, ".claude", "skills", "python-utilitario");
+    assert.ok(fs.existsSync(path.join(base, "SKILL.md")), "SKILL.md instalada");
+    assert.ok(fs.existsSync(path.join(base, "plantillas", "run_TEMPLATE.sh")), "plantillas copiadas");
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "grill-me")), "no arrastra el pool de grill");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("install-skill --python equivale a pedir python-utilitario", () => {
+  const dir = tmpProject();
+  try {
+    run(["install-skill", "--python", "--agent", "claude-code", "--scope", "project"], dir);
+    assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "python-utilitario", "SKILL.md")));
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "grilling")), "no instala grill");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("install-skill grill no instala python-utilitario y --list lo muestra", () => {
+  const dir = tmpProject();
+  try {
+    run(["install-skill", "grill", "--agent", "claude-code", "--scope", "project"], dir);
+    assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "python-utilitario")));
+    const { stdout } = run(["install-skill", "--list"], dir);
+    assert.match(stdout, /python-utilitario/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

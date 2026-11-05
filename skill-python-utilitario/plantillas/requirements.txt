@@ -1,0 +1,24 @@
+# {{NOMBRE}}.py — Dependencias
+#
+# Fuente UNICA de dependencias del utilitario. El .sh las instala dentro de
+# venv/ con:  pip install -r requirements.txt
+# Nada de esto se instala en la PC del usuario.
+#
+# Fija siempre una version minima y comenta para que sirve cada paquete.
+# Registra cada modulo tambien en el guard _FALTANTES de {{NOMBRE}}.py
+
+# --- Ejemplos, deja solo lo que uses ---------------------------------------
+# Llamadas HTTP a APIs REST
+# requests>=2.31.0
+# Lectura de archivos .xlsx / .xlsm
+# openpyxl>=3.1.0
+# Lectura de archivos .xls (formato viejo de Excel)
+# xlrd>=2.0.1
+# Conexion a MySQL / MariaDB
+# mysql-connector-python>=8.3.0
+# Google Cloud Storage
+# google-cloud-storage>=2.14.0
+# Transferencia por SFTP
+# paramiko>=3.4.0
+# Barra de progreso alternativa
+# tqdm>=4.66.0

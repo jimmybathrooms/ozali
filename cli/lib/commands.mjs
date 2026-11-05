@@ -5,7 +5,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import {
   c, ok, warn, err, info, step,
-  SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, SKILL_GRILL_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
+  SKILL_SRC, COMMIT_SKILL_SRC, SKILL_GENERATOR_SRC, SKILL_GRILL_SRC, SKILL_PYTHON_UTILITARIO_SRC, TEMPLATES_SRC, exists, ensureDir, copyDir, readJSON, writeJSON,
   ensureGitignore, pruneGitignore, GITIGNORE_OBSOLETE, gitTracks, migrateClaudeModelAliases,
   findAbstractModelFrontmatters, resolveModelForLevel, setFrontmatterModel,
   tryExec, spawnCmd, which, engramAssetName, pickEngramAsset,
@@ -2601,17 +2601,36 @@ export const GRILL_POOL = [
   "domain-modeling",
 ];
 
-/** Resuelve los nombres pedidos a la lista de skills reales del pool. */
-function resolveGrillSkills(requested) {
-  const names = requested && requested.length ? requested : ["grill"];
+/**
+ * Skills independientes (fuera del pool de grill): se instalan por nombre y no entran
+ * en el alias "grill". Cada una apunta a su carpeta de origen dentro del paquete.
+ */
+export const STANDALONE_SKILLS = {
+  "python-utilitario": SKILL_PYTHON_UTILITARIO_SRC,
+};
+
+/** Alias cortos → nombre real de la skill independiente. */
+const STANDALONE_ALIASES = { python: "python-utilitario" };
+
+/** Carpeta de origen (en el paquete) de una skill instalable por `install-skill`. */
+function skillSource(skill) {
+  return STANDALONE_SKILLS[skill] || path.join(SKILL_GRILL_SRC, skill);
+}
+
+/** Resuelve los nombres pedidos a la lista de skills reales (pool de grill + independientes). */
+function resolveInstallableSkills(requested, { python = false } = {}) {
+  const names = [...(requested || [])];
+  if (python) names.push("python-utilitario");
+  if (names.length === 0) names.push("grill");
   const out = new Set();
-  for (const n of names) {
+  for (const raw of names) {
+    const n = STANDALONE_ALIASES[raw] || raw;
     if (n === "grill") {
       GRILL_POOL.forEach((s) => out.add(s));
-    } else if (GRILL_POOL.includes(n)) {
+    } else if (GRILL_POOL.includes(n) || STANDALONE_SKILLS[n]) {
       out.add(n);
     } else {
-      warn(`Skill "${n}" no está en el pool de grill (opciones: grill, ${GRILL_POOL.join(", ")}).`);
+      warn(`Skill "${raw}" no existe (opciones: grill, ${GRILL_POOL.join(", ")}, ${Object.keys(STANDALONE_SKILLS).join(", ")}).`);
     }
   }
   return [...out];
@@ -2635,6 +2654,8 @@ export async function installSkill(cwd, opts = {}) {
     info(`Skills en el pool de grill (${GRILL_POOL.length}):`);
     for (const s of GRILL_POOL) ok(`- ${s}`);
     info('Usa "ozali install-skill grill" para instalarlas todas.');
+    info(`Skills independientes (${Object.keys(STANDALONE_SKILLS).length}):`);
+    for (const s of Object.keys(STANDALONE_SKILLS)) ok(`- ${s}  (ozali install-skill ${s}  ·  ozali install-skill --python)`);
     return 0;
   }
 
@@ -2642,15 +2663,18 @@ export async function installSkill(cwd, opts = {}) {
   const agent = opts.agent || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
     : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
 
-  const skills = resolveGrillSkills(opts._.slice(1));
+  // --python instala SOLO python-utilitario cuando no se pide nada más (sin arrastrar grill).
+  const requested = opts._.slice(1);
+  const skills = resolveInstallableSkills(requested, { python: !!opts.python });
+  if (opts.python && requested.length === 0) skills.splice(0, skills.length, "python-utilitario");
   if (skills.length === 0) {
-    err('No hay skills que instalar. Usa "ozali install-skill grill" o --list para ver el pool.');
+    err('No hay skills que instalar. Usa "ozali install-skill grill", "ozali install-skill --python" o --list.');
     return 1;
   }
 
   let installed = 0;
   for (const skill of skills) {
-    const src = path.join(SKILL_GRILL_SRC, skill);
+    const src = skillSource(skill);
     if (!exists(src)) {
       warn(`Origen no encontrado en el paquete: ${src}`);
       continue;

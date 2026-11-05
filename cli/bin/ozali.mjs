@@ -26,6 +26,7 @@ ${c.bold("Comandos:")}
             (global por defecto). Uso: ozali install-skill <skill>… donde <skill>
             es una del pool (grill-me, grilling, grill-with-docs, domain-modeling)
             o el alias "grill" para el set completo. Con --list muestra el pool.
+            También instala skills independientes: python-utilitario (o --python).
   workspace Multi-repo: toma los repos de la carpeta raíz (y los folders de un
             *.code-workspace de VSCode/Antigravity), remedia los que no tienen ozali init,
             guía la calibración y escribe la config para trabajar en conjunto.
@@ -61,7 +62,8 @@ ${c.bold("Opciones comunes:")}
    --no-jarvis          (init/update) No crear/refrescar el orquestador ozali-jarvis.
    --rollback           (update) Restaura skills desde su backup más reciente.
    --skills             (update) Fuerza actualización de skills aunque esté frozen.
-   --list               (install-skill) Lista las skills del pool de grill.
+   --list               (install-skill) Lista las skills del pool de grill y las independientes.
+   --python             (install-skill) Instala la skill python-utilitario (independiente del pool de grill).
    --hito <slug>        (state write / clean) Slug del hito.
    --fase <fase>        (state write) analysis_done | plan_approved | execution_done | testing_done | completed.
    --fix                (doctor) Auto-remedia problemas detectados (repo de conocimiento, TDD…).
@@ -116,6 +118,7 @@ function parseArgs(argv) {
     else if (a === "--rollback") opts.rollback = true;
     else if (a === "--skills") opts.skills = true;
     else if (a === "--list") opts.list = true;
+    else if (a === "--python") opts.python = true;
     else if (a === "--fix") opts.fix = true;
     else if (a === "--hito") opts.hito = argv[++i];
     else if (a === "--fase") opts.fase = argv[++i];
