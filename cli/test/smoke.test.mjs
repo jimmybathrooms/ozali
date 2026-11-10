@@ -2053,3 +2053,35 @@ test("init instala los hooks de medición de tokens (idempotente, conserva los d
     assert.match(JSON.stringify(cfg.hooks.SessionEnd), /echo mio/, "no pisa el hook del usuario");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---- doctor: opencode opcional con "both" y falso positivo de config stale ----
+import { engramOpencodeRow, detectConfigStale } from "../lib/commands.mjs";
+
+test("engramOpencodeRow: con both es opcional (no ✖); solo con opencode como único agente es fallo", () => {
+  const off = { enabled: false, detail: "no configurado en opencode" };
+  assert.equal(engramOpencodeRow("both", off).good, true, "Claude Code + opencode: no marca rojo");
+  assert.equal(engramOpencodeRow("both", off).showHelp, false);
+  assert.match(engramOpencodeRow("both", off).detail, /opcional/);
+  assert.equal(engramOpencodeRow("opencode", off).good, false);
+  assert.equal(engramOpencodeRow("opencode", off).showHelp, true);
+  assert.equal(engramOpencodeRow("both", { enabled: true, detail: "ok" }).good, true);
+});
+
+test("detectConfigStale: segundos de diferencia no son stale; una edición posterior real sí, con el texto correcto", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    fs.mkdirSync(path.join(dir, ".claude", "agents"), { recursive: true });
+    const cfg = path.join(dir, ".ozali", "config.json");
+    const agent = path.join(dir, ".claude", "agents", "x.md");
+    fs.writeFileSync(cfg, "{}"); fs.writeFileSync(agent, "x");
+    const t = Date.now() / 1000;
+    fs.utimesSync(agent, t - 100, t - 100);
+    fs.utimesSync(cfg, t - 90, t - 90);                 // 10 s después: lo escribe el propio ozali
+    assert.equal(detectConfigStale(dir).stale, false);
+    fs.utimesSync(cfg, t - 100 + 3 * 3600, t - 100 + 3 * 3600); // 3 h después: edición real
+    const r = detectConfigStale(dir);
+    assert.equal(r.stale, true);
+    assert.equal(r.configMtimeAfter, "3 h");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

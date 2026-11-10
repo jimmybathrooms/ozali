@@ -1123,6 +1123,17 @@ function warnEngramOpencodeStatus(plugin) {
   return true;
 }
 
+/**
+ * Fila del doctor para el MCP de Engram en opencode. Si opencode es el ÚNICO agente, que falte es un
+ * fallo (✖). Con "both" (Claude Code + opencode) es opcional: quien solo usa Claude Code no debe ver
+ * rojo por una herramienta que no usa; se deja como pista informativa.
+ */
+export function engramOpencodeRow(agent, oc) {
+  if (oc.enabled) return { good: true, detail: oc.detail, showHelp: false };
+  if (agent === "opencode") return { good: false, detail: oc.detail, showHelp: true };
+  return { good: true, detail: `opcional: ${oc.detail} (si usas opencode: engram setup opencode)`, showHelp: false };
+}
+
 function printEngramManualInstructions(agent) {
   const plat = process.platform;
   info("Para activar memoria buscable/acumulativa (modo " + c.bold("hybrid") + "):");
@@ -1769,10 +1780,11 @@ export async function doctor(cwd, opts = {}) {
       }
     }
     if (agent === "opencode" || agent === "both") {
-      add("Engram MCP opencode", env.engramOpencode.enabled, env.engramOpencode.enabled ? env.engramOpencode.detail : env.engramOpencode.detail);
-      if (!env.engramOpencode.enabled) {
-        warnEngramOpencodeStatus(env.engramOpencode);
-      }
+      const oc = engramOpencodeRow(agent, env.engramOpencode);
+      add("Engram MCP opencode", oc.good, oc.detail);
+      // Solo se despliega el instructivo largo cuando opencode es el agente principal: con "both"
+      // es opcional y no debe tapar el resultado del doctor.
+      if (oc.showHelp) warnEngramOpencodeStatus(env.engramOpencode);
     }
   }
   const jarvis = detectJarvis(cwd);
@@ -1815,8 +1827,8 @@ export async function doctor(cwd, opts = {}) {
   const stale = detectConfigStale(cwd);
   if (stale.stale) {
     console.log("");
-    warn("⚠  Configuración modificada después de generar los subagentes");
-    info(`   .ozali/config.json (o .local) fue editado ${stale.configMtimeAgo} después de los subagentes.`);
+    warn("Configuración modificada después de generar los subagentes");
+    info(`   .ozali/config.json (o .local) se editó ${stale.configMtimeAfter} después de generar los subagentes.`);
     info(`   Los cambios en modelos/agentes NO surten efecto hasta regenerar el cdk.`);
     info(`   Corre ${c.bold("ozali update")} o invoca la skill 'ozali' para re-generar cdk con la nueva config.`);
   }
@@ -2005,8 +2017,12 @@ function detectJarvis(cwd) {
   return { present: where.length > 0, where };
 }
 
+// Holgura entre la escritura de los subagentes y la del config: `ozali init/update` escriben ambos
+// con segundos de diferencia y eso NO es una edición manual posterior.
+const CONFIG_STALE_TOLERANCE_MS = 2 * 60 * 1000;
+
 /** Detecta si .ozali/config.json (o .local) fue modificado después de generar los subagentes. */
-function detectConfigStale(cwd) {
+export function detectConfigStale(cwd) {
   const configPath = CONFIG_PATH(cwd);
   const localPath = CONFIG_LOCAL_PATH(cwd);
   const agentsDir = path.join(cwd, ".claude", "agents");
@@ -2031,12 +2047,11 @@ function detectConfigStale(cwd) {
 
   if (newestAgentMtime === 0) return { stale: false }; // no hay subagentes aún
 
-  const stale = configMtime > newestAgentMtime;
-  if (!stale) return { stale: false };
+  if (configMtime - newestAgentMtime <= CONFIG_STALE_TOLERANCE_MS) return { stale: false };
 
   const diffMin = Math.round((configMtime - newestAgentMtime) / 60000);
-  const ago = diffMin < 60 ? `hace ${diffMin} min` : `hace ${Math.round(diffMin / 60)} h`;
-  return { stale: true, configMtimeAgo: ago };
+  const after = diffMin < 60 ? `${diffMin} min` : diffMin < 2880 ? `${Math.round(diffMin / 60)} h` : `${Math.round(diffMin / 1440)} días`;
+  return { stale: true, configMtimeAfter: after };
 }
 
 /**
