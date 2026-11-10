@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 10 -->
+<!-- CDK_CONTRACT_VERSION: 11 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -370,3 +370,52 @@ Un `cdk` conforme a la v10 debe, además de lo de v9:
   5. Reportar al usuario qué archivos se tocaron.
 
 - Estampar `cdk_contract_version: 10` en su frontmatter.
+
+### v11 — medición de tokens por hito (`ozali usage`) y bitácora de pendientes, sin plugins
+Un `cdk` conforme a la v11 debe, además de lo de v10:
+
+- **Primera acción de `cdk`, antes del recall y de cualquier análisis:** `ozali usage start`
+  (idempotente). Normalmente ya lo disparó el hook que instala `ozali init`/`update` al invocar la skill
+  (`PreToolUse` sobre `Skill`, o `UserPromptSubmit` con `/cdk`). Cuando el slug del hito existe:
+  `ozali usage start --hito <slug>` lo asigna (adopta lo que el hook abrió sin slug).
+- **Varios hitos a la vez son normales (trabajo multimodal).** Iniciar otro hito **nunca falla** por
+  haber uno sin cerrar: el anterior **queda pausado y pendiente** en la bitácora
+  (`.ozali/metrics/runs.json`, local y gitignored). Una sesión solo está activa en un hito; sesiones
+  en paralelo no se mezclan (cada segmento lleva su sesión).
+- **Bitácora de pendientes.** `ozali usage start --hito <slug>` devuelve `pendientes` (hitos abiertos o
+  pausados, con días sin actividad y marca `olvidado` a partir de 7 días). `cdk` los **muestra al
+  usuario** al iniciar y le pregunta si alguno debe retomarse, cerrarse (`usage end --hito <x>`) o
+  descartarse (`usage discard --hito <x>`). `ozali usage pending` los lista cuando se quiera y
+  `ozali doctor` los reporta; ninguno debe quedar sin cerrar sin que el usuario lo decida.
+- **Cada hito se compone de segmentos.** Solo cuenta lo que ocurre dentro de un segmento; lo que pasa
+  fuera de `cdk` o durante una pausa no se contabiliza.
+  - **Pausa explícita:** si el usuario dice que pausa o que seguirá en otra sesión/otro día,
+    `ozali usage pause --hito <slug> --nota "<motivo / qué falta>"` y registrar la pausa en
+    `05-bitacora-ejecucion.md`.
+  - **Pausa automática:** el hook `SessionEnd` pausa la sesión que se cierra; un segmento abierto
+    sin actividad por 6 h se cierra solo en su último mensaje (la inactividad no cuenta).
+  - **Reanudar el mismo hito (aunque sea otro día u otra sesión):** `ozali usage start --hito <slug>`
+    (o `resume`) abre un segmento nuevo en el mismo hito.
+- **Al cerrar el hito** (antes de escribir `06-uso-tokens.md`): `ozali usage end --hito <slug> [--saved <n>]`.
+  Imprime JSON con `input`, `output`, `cacheRead`, `cacheWrite`, `total`, `durationSec` (suma de
+  segmentos, sin pausas), `segments`, `pauses` y `models`, alimenta `.ozali/metrics/token-metrics.json`
+  y saca el hito de la bitácora. Si quedan otros pendientes, recordárselos al usuario.
+- **Rellenar `06-uso-tokens.md` desde ese JSON.** `Fuente de la medición: ozali usage (transcript)`;
+  anotar en *Notas* las pausas (`pauses`). El **costo es siempre `N/A`** (el transcript no trae dólares;
+  no se inventan cifras).
+- **Espejo en Engram (si está activo):** tras `pause`/`end`, `mem_update` de `cdk/_project/hitos-pendientes`
+  con la lista de pendientes (la bitácora local no se comparte entre máquinas).
+- **Fallback:** si el CLI no está, `usage end` falla o devuelve `null`, usar `/cost` si el proveedor es
+  Claude o dejar `N/A`. La medición **nunca bloquea** el cierre.
+- **Límites conocidos:** la bitácora vive en `.ozali/metrics/` (local): retomar en otra máquina empieza
+  de cero. Dentro de un hito activo, la conversación ajena a `cdk` en la misma sesión cuenta hasta que se
+  pause. El uso de subagentes se filtra por sesión si su transcript la declara (por verificar).
+
+- **Alcance de la migración v10 → v11** (automática, sin GATE — solo agrega instrucciones):
+  1. En `.claude/skills/cdk/SKILL.md`, agregar `usage start` (primera acción), el aviso de pendientes,
+     `pause` / `resume` y `usage end` al flujo.
+  2. En el `project-documenter`, apuntar el doc `06` a la salida de `ozali usage end`.
+  3. Los hooks viven en `.claude/settings.json`: los instala `ozali update`, no la migración.
+  4. Reportar al usuario qué archivos se tocaron.
+
+- Estampar `cdk_contract_version: 11` en su frontmatter.

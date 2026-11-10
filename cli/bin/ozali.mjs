@@ -3,7 +3,7 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, pkgVersion } from "../lib/util.mjs";
-import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, installSkill, dashboard, stateCmd, cleanCmd } from "../lib/commands.mjs";
+import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, installSkill, dashboard, stateCmd, cleanCmd, usageCommand } from "../lib/commands.mjs";
 
 const HELP = `
 ${c.bold("ozali")} ${c.dim("v" + pkgVersion())} — bootstrap de IA por equipo (TDD/SDD + memoria Engram)
@@ -42,6 +42,12 @@ ${c.bold("Comandos:")}
             write --hito <slug> --fase <fase>. Permite cerrar un hito sin usar rm.
   clean     Borra los desechables de un hito (.ozali/tmp/<hito>/ y lo del manifiesto) sin rm.
             Dry-run por defecto; --yes aplica. Uso: ozali clean --hito <slug> [--yes].
+  usage     Tokens por hito de cdk, sin plugins (lee los transcripts de Claude Code). Varios hitos
+            pueden estar pendientes a la vez; cambiar de hito pausa el anterior.
+            start|resume [--hito <slug>] · pause [--hito <slug>] [--nota <texto>] ·
+            end --hito <slug> [--saved <n>] (JSON, costo N/A) · pending (bitácora de pendientes) ·
+            discard --hito <slug> · read. Los hooks que instala init/update arrancan al invocar
+            cdk y pausan al cerrar la sesión.
   dashboard Genera un resumen agregado de todos los hitos CDK documentados
             (.ozali/dashboard.md) con métricas de uso y telemetría.
 
@@ -121,6 +127,9 @@ function parseArgs(argv) {
     else if (a === "--python") opts.python = true;
     else if (a === "--fix") opts.fix = true;
     else if (a === "--hito") opts.hito = argv[++i];
+    else if (a === "--nota") opts.nota = argv[++i];
+    else if (a === "--session") opts.session = argv[++i];
+    else if (a === "--saved") opts.saved = argv[++i];
     else if (a === "--fase") opts.fase = argv[++i];
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "-v" || a === "--version") opts.version = true;
@@ -138,8 +147,8 @@ async function main() {
 
   const cwd = process.cwd();
   // Banner de versión: confirma qué versión de ozali está corriendo en cada comando.
-  // (`state` lo omite: su salida —JSON— la consume cdk y el banner la contaminaría.)
-  if (cmd !== "state") console.log(`${c.bold("ozali")} ${c.dim("v" + pkgVersion())}`);
+  // (`state` y `usage` lo omiten: su salida —JSON— la consume cdk y el banner la contaminaría.)
+  if (cmd !== "state" && cmd !== "usage") console.log(`${c.bold("ozali")} ${c.dim("v" + pkgVersion())}`);
   switch (cmd) {
     case "init": return await init(cwd, opts);
     case "workspace": return await workspace(cwd, opts);
@@ -150,6 +159,7 @@ async function main() {
     case "cloud": return await cloud(cwd, opts);
     case "dashboard": return await dashboard(cwd, opts);
     case "state": return await stateCmd(cwd, opts);
+    case "usage": return await usageCommand(cwd, opts);
     case "clean": return await cleanCmd(cwd, opts);
     case "install-skills": return await installSkills(cwd, opts);
     case "install-skill": return await installSkill(cwd, opts);

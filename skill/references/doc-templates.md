@@ -313,7 +313,8 @@ usuario, en:
 ### 06-uso-tokens.md — Uso de tokens (al cierre)
 
 > Se captura **al terminar el plan**. Las métricas se rellenan en caso de que el proveedor sea
-> **Claude/Anthropic** (fuente: comando `/cost` de Claude Code). Con cualquier otro
+> **Claude/Anthropic**. Fuente preferida: `ozali usage end --hito <slug>` (mide solo lo ocurrido dentro de cdk:
+> los segmentos entre `usage start` y `usage end`, sin pausas; costo siempre `N/A`). Fallback: `/cost` de Claude Code. Con cualquier otro
 > proveedor verifica si puedes obtener la información y si no puedes, deja la estructura con el **nombre del proveedor** y las métricas en `N/A`
 > (data presente, sin inventar cifras).
 
@@ -324,7 +325,7 @@ usuario, en:
 
 **Proveedor:** Claude (Anthropic) | <otro proveedor>
 **Modelo:** <p. ej. claude-opus-4-8 / N/A>
-**Fuente de la medición:** /cost (Claude Code) | N/A
+**Fuente de la medición:** ozali usage (transcript) | /cost (Claude Code) | N/A
 **Capturado:** <yyyy-mm-dd HH:MM:SS>
 
 ## Métricas de la sesión
@@ -335,8 +336,8 @@ usuario, en:
 | Tokens de caché (lectura)   | <n / N/A> |
 | Tokens de caché (escritura) | <n / N/A> |
 | Total de tokens             | <n / N/A> |
-| Total de tiempo de sesión   | <n / N/A> |
-| Costo estimado              | <$ / N/A> |
+| Total de tiempo de la corrida | <durationSec / N/A> |
+| Costo estimado              | N/A (ozali usage no calcula costo) |
 
 ## Ahorro por recall (Engram)
 | Métrica | Valor |
@@ -346,6 +347,7 @@ usuario, en:
 | Relectura evitada (estimada) | <n tokens / N/A> |
 
 ## Notas
+- Pausas de la corrida: <pauses> (retomada en otra sesión: sí / no)
 - <observaciones sobre el consumo del hito; deja vacío o "N/A" si no puedes encontrar información del proveedor>
 ```
 

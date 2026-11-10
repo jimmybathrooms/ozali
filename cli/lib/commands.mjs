@@ -16,6 +16,7 @@ import {
 import { detectAll, detectSourceOfTruth, detectBusiness, detectWebProject, detectWorkspace, detectReferences, findWorkspaceRootUp, detectEngramMcpServer,
 } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
+import { usageCmd, usageHook, pendingHitos } from "./usage.mjs";
 
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
 const CONFIG_LOCAL_PATH = (cwd) => path.join(cwd, ".ozali", "config.local.json");
@@ -463,6 +464,7 @@ export async function init(cwd, opts) {
   // 2) perfiles base de permisos (idempotentes, merge mínimo) por agente
   if (agent === "claude-code" || agent === "both") {
     ensureClaudeCodeProfile(cwd, scope);
+    if (scope !== "global") ensureUsageHooks(cwd);
     // Claude Code ignora los permisos de un .claude/settings.json de proyecto hasta confiar en él.
     if (scope === "project" && !opts.noTrust) await ensureClaudeWorkspaceTrust(cwd, opts);
   }
@@ -1967,6 +1969,17 @@ export async function doctor(cwd, opts = {}) {
     if (cloudMeta && cloudMeta.dashboard) info(`Dashboard: ${c.cyan(cloudMeta.dashboard)}`);
   }
 
+  // Bitácora de hitos pendientes (ozali usage): que no queden abiertos sin cerrar.
+  const pend = pendingHitos(cwd);
+  if (pend.pendientes.length) {
+    step("Hitos pendientes (ozali usage)");
+    for (const h of pend.pendientes) {
+      const tag = h.olvidado ? c.yellow(` ⚠ ${h.diasSinActividad} días sin actividad`) : c.dim(` (${h.diasSinActividad} d)`);
+      console.log(`  ${c.bold(h.hito)}: ${h.estado}${tag}${h.nota ? c.dim(" — " + h.nota) : ""}`);
+    }
+    info("Retómalos invocando cdk o ciérralos con " + c.bold("ozali usage end --hito <slug>") + " / " + c.bold("ozali usage discard --hito <slug>") + ".");
+  }
+
   // Tendencia de uso de tokens (la escribe cdk en cada hito; informativo).
   const metrics = readJSON(path.join(cwd, ".ozali", "metrics", "token-metrics.json"));
   if (metrics && Array.isArray(metrics.hits) && metrics.hits.length) {
@@ -2288,7 +2301,7 @@ export async function update(cwd, opts = {}) {
   await migrateLegacySkills(cwd, opts, agent, scope);
 
   // 2) Perfiles base de permisos (idempotente: recoge defaults nuevos del paquete)
-  if (agent === "claude-code" || agent === "both") ensureClaudeCodeProfile(cwd, scope);
+  if (agent === "claude-code" || agent === "both") { ensureClaudeCodeProfile(cwd, scope); if (scope !== "global") ensureUsageHooks(cwd); }
   if (agent === "opencode" || agent === "both") ensureOpencodeProfile(cwd);
 
   // 3) ozali-jarvis: crea el orquestador en repos previos a 0.4.0 y refresca el resto.
@@ -3486,6 +3499,39 @@ export async function stateCmd(cwd, opts = {}) {
   }
   err("uso: ozali state read | ozali state clear | ozali state write --hito <slug> --fase <fase>");
   return 1;
+}
+
+/** `ozali usage start|end|read` — tokens de una corrida de cdk (ver usage.mjs). */
+export async function usageCommand(cwd, opts = {}) {
+  if (opts._[1] === "hook") {
+    // Payload del hook de Claude Code por stdin (JSON). Silencioso y siempre exit 0.
+    let text = "";
+    try { text = fs.readFileSync(0, "utf8"); } catch { /* sin stdin */ }
+    return usageHook(repoRoot(cwd), text);
+  }
+  return usageCmd(repoRoot(cwd), opts);
+}
+
+const USAGE_HOOK_CMD = "command -v ozali >/dev/null 2>&1 && ozali usage hook || true";
+
+/**
+ * Hooks que arrancan la medición de tokens al invocar `cdk` y la pausan al cerrar la sesión
+ * (idempotente; conserva los hooks del usuario). Solo en el settings del proyecto.
+ */
+function ensureUsageHooks(cwd) {
+  const p = path.join(cwd, ".claude", "settings.json");
+  const cfg = readJSON(p, {});
+  cfg.hooks = cfg.hooks || {};
+  const entry = (matcher) => ({ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: USAGE_HOOK_CMD }] });
+  const want = { PreToolUse: entry("Skill"), UserPromptSubmit: entry(), SessionEnd: entry() };
+  let added = 0;
+  for (const [evt, val] of Object.entries(want)) {
+    const arr = cfg.hooks[evt] || (cfg.hooks[evt] = []);
+    if (!JSON.stringify(arr).includes("ozali usage hook")) { arr.push(val); added++; }
+  }
+  writeJSON(p, cfg);
+  if (added) ok(`Hooks de medición de tokens (ozali usage) añadidos a ${c.bold(".claude/settings.json")} (${added}).`);
+  else info("Hooks de medición de tokens ya presentes.");
 }
 
 // ===================================================== ozali clean ===========

@@ -675,6 +675,12 @@ completo (naming, llamadas inline, degradación) en
   `analisis`/`resumen-tecnico` previo si su `ultimo_commit` sigue vigente (guard de staleness); si el
   código cambió, re-analizar solo el delta. Recuperación selectiva y restauración tras compactación
   desde `state`+`bitacora`. Ver convención §7.
+- **Medición de tokens y pendientes (contrato v11)** → `ozali usage start` es la **primera acción** de
+  `cdk` (el hook ya suele haberlo disparado; idempotente); `usage start --hito <slug>` asigna el hito y
+  devuelve los **pendientes** (hay que mostrárselos al usuario: retomar, cerrar o descartar). Iniciar
+  otro hito **no falla**: pausa el anterior y lo deja en la bitácora. `usage pause --hito <slug> --nota
+  "<motivo>"` si el usuario pausa; `usage end --hito <slug>` al cerrar rellena `06-uso-tokens.md`
+  (costo `N/A`). Si falla: `/cost` o `N/A`; nunca bloquea.
 - **Telemetría** → espejar `uso-tokens` a `cdk/{hito}/uso-tokens`, agregar en
   `cdk/_project/token-metrics` y escribir `.ozali/metrics/token-metrics.json` (lo lee `ozali doctor`).
 - **Al aprobar el GATE** → `mem_save` de `cdk/{hito}/plan-aprobado` **una sola vez** (inmutable).

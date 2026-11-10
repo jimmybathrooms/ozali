@@ -230,10 +230,10 @@ test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 10\n---\n# cdk\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 11\n---\n# cdk\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
-    assert.match(stdout, /contrato v10 \(al día\)/, "doctor marca cdk al día");
+    assert.match(stdout, /contrato v11 \(al día\)/, "doctor marca cdk al día");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -255,7 +255,7 @@ test("doctor NO marca copsis-commit si solo es mención negativa (nunca copsis-c
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 10\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 11\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
     assert.doesNotMatch(stdout, /contiene copsis-commit/, "doctor NO debe marcar copsis-commit en menciones negativas");
@@ -1748,20 +1748,20 @@ test("doctor: 'Desechables de hitos' en verde sin .ozali/tmp/", () => {
 });
 
 // ---- P-011: contrato cdk v8 (cierre sin permisos amplios) -------------------
-test("doctor marca una cdk v7 como desactualizada frente al contrato v10", () => {
+test("doctor marca una cdk v7 como desactualizada frente al contrato v11", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
     writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 7\n---\n# cdk\n");
     const line = run(["doctor"], dir, true).stdout.split("\n").find((l) => l.includes("Skill cdk"));
     assert.ok(line.includes("✖"), line);
-    assert.match(line, /contrato v7 < v10/);
+    assert.match(line, /contrato v7 < v11/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("cdk-contract.md declara la v8 con el cierre por ozali state / ozali clean y su migración", () => {
   const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "cdk-contract.md"), "utf8");
-  assert.match(txt, /CDK_CONTRACT_VERSION:\s*10/);
+  assert.match(txt, /CDK_CONTRACT_VERSION:\s*11/);
   const v8 = txt.slice(txt.indexOf("### v8"), txt.indexOf("### v9"));
   assert.ok(v8.length > 10, "hay sección ### v8");
   for (const needle of ["ozali state clear", "ozali clean --hito", ".ozali/tmp/", "manifest.json", "heredoc", "v7 → v8", "fase\":\"completed"]) {
@@ -1799,7 +1799,7 @@ test("doctor exige project-ui-reviewer en web con cdk v10 y lo ignora en backend
   try {
     for (const d of [web, back]) {
       initRepo(d);
-      writeCdkStub(d, "---\nname: cdk\ncdk_contract_version: 10\n---\n# cdk\n");
+      writeCdkStub(d, "---\nname: cdk\ncdk_contract_version: 11\n---\n# cdk\n");
     }
     fs.writeFileSync(path.join(web, "package.json"), JSON.stringify({ dependencies: { "@angular/core": "^17.0.0" } }));
     fs.writeFileSync(path.join(back, "pom.xml"), "<project/>");
@@ -1834,4 +1834,222 @@ test("la skill y sus referencias no mandan a borrar el state con rm y sí a ozal
   assert.match(read("SKILL.md"), /ozali clean --hito/);
   assert.match(read("references/agents-blueprint.md"), /\.ozali\/tmp\/<hito>\//);
   assert.match(read("references/doc-templates.md"), /ozali clean/);
+});
+
+// ---- ozali usage: tokens de una corrida de cdk sin plugins -------------------
+import { encodeProjectDir, aggregateUsage, hookAction, usageHook } from "../lib/usage.mjs";
+
+function fakeTranscript(home, dir, name, lines) {
+  const d = path.join(home, ".claude", "projects", encodeProjectDir(fs.realpathSync(dir)));
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, name), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+}
+const asst = (id, ts, u, model = "claude-sonnet-5-5") => ({
+  type: "assistant", timestamp: ts, uuid: "u-" + id + ts,
+  message: { id, model, usage: { input_tokens: u[0], output_tokens: u[1], cache_read_input_tokens: u[2], cache_creation_input_tokens: u[3] } },
+});
+
+test("encodeProjectDir: reemplaza todo no alfanumérico por guion", () => {
+  assert.equal(encodeProjectDir("/Users/a/ia_repos/ozali"), "-Users-a-ia-repos-ozali");
+});
+
+test("aggregateUsage: deduplica por message.id, excluye las pausas y filtra por sesión", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-agg-"));
+  try {
+    const f = path.join(dir, "s.jsonl");
+    const mk = (id, ts, u, sessionId) => ({ ...asst(id, ts, u), sessionId });
+    const rows = [
+      mk("m1", "2026-01-01T00:00:10Z", [2, 100, 1000, 50], "s1"),
+      mk("m1", "2026-01-01T00:00:10Z", [2, 100, 1000, 50], "s1"), // repetido (otro bloque)
+      mk("pausa", "2026-01-01T00:01:30Z", [9, 9, 9, 9], "s1"),     // entre segmentos: no cuenta
+      mk("otra", "2026-01-01T00:00:20Z", [9, 9, 9, 9], "s2"),      // otra sesión en paralelo: no cuenta
+      mk("m2", "2026-01-01T00:02:10Z", [3, 200, 2000, 0], "s1"),
+      mk("viejo", "2025-12-31T23:00:00Z", [9, 9, 9, 9], "s1"),     // antes del primer segmento
+    ];
+    fs.writeFileSync(f, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const T = (x) => Date.parse(x);
+    const r = aggregateUsage([f], [
+      { from: T("2026-01-01T00:00:00Z"), to: T("2026-01-01T00:01:00Z"), session: "s1" },
+      { from: T("2026-01-01T00:02:00Z"), to: T("2026-01-01T00:03:00Z"), session: "s1" },
+    ]);
+    assert.equal(r.messages, 2);
+    assert.equal(r.input, 5); assert.equal(r.output, 300);
+    assert.equal(r.cacheRead, 3000); assert.equal(r.cacheWrite, 50);
+    assert.equal(r.total, 3355);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+const LEDGER = (dir) => path.join(dir, ".ozali", "metrics", "runs.json");
+const ago = (s) => new Date(Date.now() - s * 1000).toISOString();
+const readLedgerT = (dir) => JSON.parse(fs.readFileSync(LEDGER(dir), "utf8"));
+const writeLedgerT = (dir, hitos) => { fs.mkdirSync(path.dirname(LEDGER(dir)), { recursive: true }); fs.writeFileSync(LEDGER(dir), JSON.stringify({ hitos })); };
+const jrun = (dir, args) => JSON.parse(run(args, dir).stdout);
+
+test("usage end: suma los segmentos del hito (con pausa en medio), solo su sesión, costo N/A, y lo saca de pendientes", () => {
+  const dir = tmpProject();
+  try {
+    const home = homeFor(dir);
+    writeLedgerT(dir, {
+      "mi-hito": { estado: "en_curso", creado: ago(200), ultimaActividad: ago(50), segments: [{ start: ago(100), end: ago(80), session: "s1" }, { start: ago(50), session: "s1" }] },
+      "otro": { estado: "pausado", creado: ago(200), ultimaActividad: ago(70), segments: [{ start: ago(150), end: ago(120), session: "s1" }] },
+    });
+    const m = (id, secs, u, sessionId = "s1") => ({ ...asst(id, ago(secs), u), sessionId });
+    fakeTranscript(home, dir, "sesion.jsonl", [
+      m("viejo", 500, [1, 1, 1, 1]),         // antes de la corrida
+      m("a", 90, [4, 40, 400, 4]),           // segmento 1
+      m("a", 90, [4, 40, 400, 4]),           // repetido
+      m("pausa", 65, [7, 7, 7, 7]),          // pausa: no cuenta
+      m("ajena", 30, [8, 8, 8, 8], "s2"),    // otra sesión en paralelo: no cuenta
+      m("b", 30, [1, 10, 100, 1]),           // segmento 2
+      m("del-otro", 130, [5, 5, 5, 5]),      // pertenece al otro hito
+    ]);
+    const out = jrun(dir, ["usage", "end", "--hito", "mi-hito", "--saved", "123"]); // JSON puro, sin banner
+    assert.equal(out.messages, 2);
+    assert.equal(out.input, 5); assert.equal(out.output, 50);
+    assert.equal(out.total, 448 + 112);
+    assert.equal(out.segments, 2); assert.equal(out.pauses, 1);
+    assert.ok(out.durationSec >= 70 && out.durationSec <= 75, "duración = solo segmentos activos (20 s + ~50 s)");
+    assert.equal(out.costUsd, null); assert.equal(out.hito, "mi-hito");
+    const tm = JSON.parse(fs.readFileSync(path.join(dir, ".ozali", "metrics", "token-metrics.json"), "utf8"));
+    assert.equal(tm.hits[0].hito, "mi-hito"); assert.equal(tm.hits[0].savedByRecall, 123);
+    const led = readLedgerT(dir);
+    assert.ok(!led.hitos["mi-hito"], "cerrado: sale de la bitácora");
+    assert.ok(led.hitos["otro"], "el otro hito sigue pendiente");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("varios hitos a la vez: cambiar de hito en la misma sesión pausa el anterior; otra sesión no se toca; nada falla", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(jrun(dir, ["usage", "start", "--hito", "a", "--session", "s1"]).status, "started");
+    const b = jrun(dir, ["usage", "start", "--hito", "b", "--session", "s1"]);
+    assert.equal(b.status, "started"); assert.deepEqual(b.pausados, ["a"]);
+    assert.deepEqual(b.pendientes.map((p) => p.hito), ["a"]);
+    const c2 = jrun(dir, ["usage", "start", "--hito", "c", "--session", "s2"]); // sesión paralela
+    assert.equal(c2.pausados, undefined, "no pausa lo de otra sesión");
+    const st = jrun(dir, ["usage", "pending"]);
+    const by = Object.fromEntries(st.pendientes.map((p) => [p.hito, p.estado]));
+    assert.deepEqual(by, { a: "pausado", b: "en_curso", c: "en_curso" });
+    // volver a "a" desde s1: reanuda y pausa "b"
+    const back = jrun(dir, ["usage", "start", "--hito", "a", "--session", "s1"]);
+    assert.equal(back.status, "resumed"); assert.deepEqual(back.pausados, ["b"]);
+    assert.equal(readLedgerT(dir).hitos.a.segments.length, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("el hook abre sin slug (_sin-hito) y `start --hito` lo adopta; un segundo disparo no parte el segmento", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(jrun(dir, ["usage", "start", "--session", "s1"]).status, "started");
+    assert.equal(jrun(dir, ["usage", "start", "--session", "s1"]).status, "already-running");
+    assert.ok(readLedgerT(dir).hitos["_sin-hito"]);
+    const r = jrun(dir, ["usage", "start", "--hito", "login", "--session", "s1"]);
+    assert.equal(r.status, "started");
+    const led = readLedgerT(dir);
+    assert.ok(!led.hitos["_sin-hito"], "ya no queda sin asignar");
+    assert.equal(led.hitos.login.segments.length, 1);
+    assert.equal(led.hitos.login.segments[0].session, "s1");
+    assert.equal(jrun(dir, ["usage", "start", "--hito", "login", "--session", "s1"]).status, "already-running");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pause: por hito (con nota), por sesión, y retomar el mismo hito después", () => {
+  const dir = tmpProject();
+  try {
+    jrun(dir, ["usage", "start", "--hito", "a", "--session", "s1"]);
+    const p = jrun(dir, ["usage", "pause", "--hito", "a", "--nota", "sigo mañana"]);
+    assert.equal(p.status, "paused"); assert.deepEqual(p.hitos, ["a"]);
+    assert.equal(jrun(dir, ["usage", "pause", "--hito", "a"]).status, "nothing-to-pause");
+    const pend = jrun(dir, ["usage", "pending"]).pendientes[0];
+    assert.equal(pend.estado, "pausado"); assert.equal(pend.nota, "sigo mañana");
+    jrun(dir, ["usage", "resume", "--hito", "a", "--session", "s9"]); // otra sesión, otro día
+    const led = readLedgerT(dir);
+    assert.equal(led.hitos.a.segments.length, 2); assert.equal(led.hitos.a.segments[1].session, "s9");
+    assert.equal(led.hitos.a.nota, undefined, "la nota se limpia al retomar");
+    assert.deepEqual(jrun(dir, ["usage", "pause", "--session", "s9"]).hitos, ["a"]);
+    assert.equal(run(["usage", "resume", "--hito", "nada"], dir, true).code, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("segmento abierto de una sesión muerta: se cierra en su última actividad; los pendientes viejos salen como olvidados", () => {
+  const dir = tmpProject();
+  try {
+    const home = homeFor(dir);
+    writeLedgerT(dir, {
+      muerto: { estado: "en_curso", creado: ago(40000), ultimaActividad: ago(40000), segments: [{ start: ago(36000), session: "s1" }] },
+      viejo: { estado: "pausado", creado: ago(86400 * 12), ultimaActividad: ago(86400 * 10), segments: [{ start: ago(86400 * 11), end: ago(86400 * 10) }] },
+    });
+    fakeTranscript(home, dir, "s.jsonl", [{ ...asst("x", ago(35000), [1, 1, 1, 1]), sessionId: "s1" }]);
+    const r = jrun(dir, ["usage", "pending"]);
+    const muerto = r.pendientes.find((p) => p.hito === "muerto");
+    assert.equal(muerto.estado, "pausado");
+    assert.match(muerto.nota, /inactividad/);
+    const seg = readLedgerT(dir).hitos.muerto.segments[0];
+    assert.ok(Math.abs(Date.parse(seg.end) - Date.parse(ago(35000))) < 2000, "fin = último mensaje, no 'ahora'");
+    assert.equal(r.pendientes.find((p) => p.hito === "viejo").olvidado, true);
+    assert.equal(muerto.olvidado, false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("usage end: sin --hito o sin marca falla con mensaje claro; sin transcripts devuelve N/A; discard descarta", () => {
+  const dir = tmpProject();
+  try {
+    jrun(dir, ["usage", "start", "--hito", "a", "--session", "s1"]);
+    const noHito = run(["usage", "end"], dir, true);
+    assert.notEqual(noHito.code, 0); assert.match(noHito.stdout, /--hito.*a/s);
+    const noMark = run(["usage", "end", "--hito", "zzz"], dir, true);
+    assert.notEqual(noMark.code, 0); assert.match(noMark.stdout, /usage start/);
+    const out = jrun(dir, ["usage", "end", "--hito", "a"]);
+    assert.equal(out.total, null); assert.equal(out.provider, null); assert.equal(out.source, "N/A");
+    jrun(dir, ["usage", "start", "--hito", "b"]);
+    assert.equal(jrun(dir, ["usage", "discard", "--hito", "b"]).status, "discarded");
+    assert.deepEqual(jrun(dir, ["usage", "pending"]).pendientes, []);
+    assert.equal(run(["usage", "start", "--hito", "Mal Slug"], dir, true).code, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("hookAction: arranca con la skill cdk (Skill o /cdk) y pausa al cerrar la sesión; ignora el resto", () => {
+  assert.equal(hookAction({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "cdk" } }), "start");
+  assert.equal(hookAction({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "proj:cdk" } }), "start");
+  assert.equal(hookAction({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "ozali" } }), null);
+  assert.equal(hookAction({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "cdk" } }), null);
+  assert.equal(hookAction({ hook_event_name: "UserPromptSubmit", prompt: "/cdk ajusta el login" }), "start");
+  assert.equal(hookAction({ hook_event_name: "UserPromptSubmit", prompt: "explica el cdk" }), null);
+  assert.equal(hookAction({ hook_event_name: "SessionEnd" }), "pause");
+  assert.equal(hookAction(null), null);
+});
+
+test("usageHook: arranca y pausa por sesión en proyectos con ozali; no toca repos ajenos; basura en stdin no rompe", async () => {
+  const ajeno = tmpProject();
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    const skill = JSON.stringify({ hook_event_name: "PreToolUse", session_id: "s1", tool_name: "Skill", tool_input: { skill: "cdk" } });
+    assert.equal(await usageHook(ajeno, skill), 0);
+    assert.ok(!fs.existsSync(path.join(ajeno, ".ozali")), "no crea .ozali en repos sin ozali");
+    assert.equal(await usageHook(dir, "no es json"), 0);
+    assert.equal(await usageHook(dir, skill), 0);
+    let led = readLedgerT(dir);
+    assert.equal(led.hitos["_sin-hito"].segments[0].session, "s1");
+    await usageHook(dir, JSON.stringify({ hook_event_name: "SessionEnd", session_id: "otra" })); // otra sesión: no pausa
+    assert.equal(readLedgerT(dir).hitos["_sin-hito"].segments[0].end, undefined);
+    await usageHook(dir, JSON.stringify({ hook_event_name: "SessionEnd", session_id: "s1" }));
+    led = readLedgerT(dir);
+    assert.ok(led.hitos["_sin-hito"].segments[0].end, "SessionEnd pausa el segmento de esa sesión");
+  } finally { fs.rmSync(ajeno, { recursive: true, force: true }); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("init instala los hooks de medición de tokens (idempotente, conserva los del usuario)", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".claude", "settings.json"), JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: "echo mio" }] }] } }));
+    const args = ["init", "--yes", "--no-engram", "--no-trust", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")];
+    run(args, dir); run(args, dir);
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.json"), "utf8"));
+    const count = (evt) => JSON.stringify(cfg.hooks[evt]).split("ozali usage hook").length - 1;
+    assert.equal(count("PreToolUse"), 1); assert.equal(count("UserPromptSubmit"), 1); assert.equal(count("SessionEnd"), 1);
+    assert.equal(cfg.hooks.PreToolUse.find((h) => JSON.stringify(h).includes("ozali usage hook")).matcher, "Skill");
+    assert.match(JSON.stringify(cfg.hooks.SessionEnd), /echo mio/, "no pisa el hook del usuario");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
