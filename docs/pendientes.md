@@ -6,7 +6,36 @@ entrada (el histórico queda en el commit).
 
 ---
 
-_No hay pendientes abiertos. Histórico de cierres en `git log -- docs/pendientes.md`._
+## P-014 · Catálogo de UI: cerrar los huecos que dejó la evaluación con un agente consumidor
+
+**Qué está mal hoy.** La evaluación del generador (brief y comparativa se conservan fuera del repo: contienen nombres del caso de prueba) llevó el blueprint de v0.26.0 a una
+salida que evita el error del footer y la trampa de scroll, pero un agente que usa **solo** el
+catálogo aún falla 3 de 10 criterios del caso real. Ya aplicado en esta iteración: definición de uso
+con patrón multilínea, estados `por código`/`interno`, "No confundir con", lookup diseño→componente,
+esqueleto con regla de desborde, criterio de directorio compartido, modo no interactivo y migración
+opcional en modo actualizar. Falta:
+
+1. **Call-site real del sustituto:** cuando un componente `sin uso` tiene "No confundir con", citar
+   un uso real (`archivo:línea`) del mecanismo que cubre la función, con su posición en el esqueleto
+   (el pie va fuera del contenedor principal; hoy el catálogo no lo dice).
+2. **Valores válidos de entradas tipadas** por enum/unión (p. ej. `type` de un aviso): listarlos.
+3. **Origen de lo que el esqueleto usa** (estructura de página, etiqueta, helper responsive, loader):
+   clase base o servicio.
+4. **Librería base por nombre:** módulos exportados, no solo su cantidad.
+5. **API de modales** abiertos por código (`componentInstance.*`, retorno) y el helper responsive
+   dentro del esqueleto cuando el repo lo usa en la mayoría de plantillas.
+6. **Criterio "≥3 carpetas de feature"** aplicado también a los directorios **excluidos**; decidir si
+   un layout compartido (`menu`) entra.
+7. **Migración en modo actualizar:** hoy solo está documentada en el blueprint (§2.5) y la Fase 2.6;
+   falta probarla de punta a punta (el agente de la prueba la reportó como faltantes, no la ejecutó).
+
+**Cómo se verifica.** Regenerar sobre una copia del caso de prueba sin catálogo y repetir el test del
+agente consumidor (10 criterios); objetivo: 10/10 con solo el catálogo generado. Añadir a
+`smoke.test.mjs` las reglas mecánicas nuevas. Cierre: borrar esta entrada.
+
+---
+
+_Histórico de cierres en `git log -- docs/pendientes.md`._
 
 Cerrados recientemente:
 

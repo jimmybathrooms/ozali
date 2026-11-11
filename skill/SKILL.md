@@ -320,12 +320,26 @@ Corre cuando el repo es **web** (blueprint §1) y falta `.ai/context/ui-componen
 1. **Pregunta** si generarlo ahora (coste: recorrer los componentes compartidos y contar usos).
    - **No** → continúa; anótalo en `01-analisis.md` y en `03-mejoras.md` (relevancia Media). El
      revisor de UI se genera igual, pero avisa que falta el catálogo.
-   - **Sí** → confirma con el usuario los **directorios de componentes** detectados y sigue.
-2. **Extrae** por componente (blueprint §2.2): selector, módulo, entradas/salidas y **nº de usos con
-   conteo ejecutado y citado**; documenta cómo se define el color/tema y la librería de i18n (§2.3).
-3. **Si ya existe** (modo actualizar, o `--ui`): reporta componentes **nuevos, eliminados y con usos
-   distintos** y aplica solo el delta. **Preserva** los bloques `> **Equipo:**` y lo escrito a mano.
-4. Agrega la fila **Catálogo de UI** a `AI.md` (knowledge-blueprint §4) y espeja a Engram.
+   - **Sí** → confirma con el usuario los **directorios de componentes** detectados y sigue (criterio de
+     "compartido" y exclusiones en blueprint §2.1). En modo
+     **no interactivo** (subagente/CI) no preguntes: usa los detectados y **lístalos** en el catálogo.
+2. **Extrae** (blueprint §2.1-§2.3): componentes, **directivas y pipes**, y la librería base de UI;
+   por elemento: selector, módulo, entradas/salidas, **usos por plantilla y por código** con la
+   *definición de uso* escrita en el documento y el comando citado, **estado** (`en uso`, `por
+   código`, `interno`, `legado`, `sin uso`) y, si aplica, **"no confundir con"** (qué mecanismo cubre
+   de verdad la función que sugiere el nombre). Documenta color/tema (con la tabla rol → clase),
+   tipografía e i18n.
+3. **Escribe** el documento con la estructura de blueprint §2.4: reglas del proyecto, **tabla "del
+   diseño al componente"**, **esqueleto típico de página** (con las trampas de clases medidas),
+   colores y temas, componentes agrupados por propósito, directivas/pipes, librería base, i18n,
+   mantenimiento y apéndice de comandos. Nunca declares `sin uso` sin ambos conteos.
+4. **Si ya existe** (modo actualizar, o `--ui`): reporta componentes **nuevos, eliminados y con usos
+   distintos** y aplica solo el delta. **Preserva** los bloques `> **Equipo:**` y lo escrito a mano
+   (secciones que no sean tablas generadas).
+   Después compara con blueprint §2.4 y **lista lo que falta** (definición de uso, Estado, "No
+   confundir con", conteo por código, esqueleto, lookup, directivas/pipes, librería base, i18n,
+   apéndice): ofrece migrarlo en el GATE como secciones nuevas (blueprint §2.5).
+5. Agrega la fila **Catálogo de UI** a `AI.md` (knowledge-blueprint §4) y espeja a Engram.
 
 El resumen (conteos + componentes nuevos/eliminados) entra al GATE de la Fase 5.
 

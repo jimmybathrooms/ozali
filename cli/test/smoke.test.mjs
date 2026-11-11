@@ -1793,6 +1793,22 @@ test("contrato v10: preserva contexto manual y limita el revisor de UI a proyect
   assert.ok(fs.existsSync(path.join(PKG_ROOT, "skill", "references", "ui-catalog-blueprint.md")));
 });
 
+test("blueprint de UI: exige lookup diseño→componente, esqueleto, uso por código, estado interno y no confundir con", () => {
+  const bp = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "ui-catalog-blueprint.md"), "utf8");
+  for (const needle of [
+    "## Del diseño al componente", "## Esqueleto típico de una página", "## Reglas del proyecto",
+    "## Colores y temas", "## Internacionalización", "## Mantenimiento", "## Apéndice",
+    "Definición de uso", "`interno`", "`por código`", "No confundir con", "> **Equipo:**", "Modo no interactivo",
+    "<tag([ >/]|$)", "Regla de desborde", "Migración opcional", "Cómo decidir qué es compartido",
+  ]) assert.ok(bp.includes(needle), `el blueprint de UI incluye ${needle}`);
+  assert.doesNotMatch(bp, /biibiic|ngv-|stilo-crumb/i, "el blueprint es agnóstico del proyecto");
+  const skill = fs.readFileSync(path.join(PKG_ROOT, "skill", "SKILL.md"), "utf8");
+  const f26 = skill.slice(skill.indexOf("## Fase 2.6"), skill.indexOf("## Fase 3"));
+  for (const needle of ["no interactivo", "por código", "no confundir con", "esqueleto", "migrarlo"]) {
+    assert.ok(f26.includes(needle), `la Fase 2.6 menciona ${needle}`);
+  }
+});
+
 test("doctor exige project-ui-reviewer en web con cdk v10 y lo ignora en backend", () => {
   const web = tmpProject();
   const back = tmpProject();
