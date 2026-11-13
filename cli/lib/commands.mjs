@@ -346,15 +346,7 @@ export async function init(cwd, opts) {
     if (versionCheck && versionCheck.canUpgrade) {
       warn(`Hay una nueva versión de Engram: ${c.bold(versionCheck.latest)} (tienes ${versionCheck.current}).`);
       if (await confirm("¿Actualizar Engram ahora?", false)) {
-        info("Actualizando Engram…");
-        if (process.platform === "darwin" && which("brew")) {
-          spawnCmd("brew", ["upgrade", "gentleman-programming/tap/engram"]);
-        } else if (which("go")) {
-          spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
-        } else {
-          warn("No se puede auto-actualizar sin Homebrew (macOS) o Go. Descarga manual:");
-          info("  " + c.cyan(versionCheck.url));
-        }
+        upgradeEngram(versionCheck);
       }
     } else if (versionCheck && versionCheck.cooldown) {
       info(`Engram ${c.bold(versionCheck.latest)} está disponible pero aún en cooldown de seguridad (24h). Se activará el ${new Date(new Date(versionCheck.publishedAt).getTime() + 24*60*60*1000).toLocaleDateString()}.`);
@@ -516,6 +508,29 @@ export async function init(cwd, opts) {
   console.log(`  3. Tras trabajar, corre ${c.bold("ozali sync")} para llevar el histórico al repo de conocimiento.`);
   console.log(`  ${c.dim("Salud en cualquier momento:")} ${c.bold("ozali doctor")}`);
   return 0;
+}
+
+/**
+ * Actualiza Engram según el SO. macOS: Homebrew → Go. Linux: binario precompilado
+ * (verificado con checksums.txt, sin toolchain) → Go. Siempre fija la versión que
+ * pasó el cooldown de 24h (no "la última"). Si todo falla, muestra la descarga manual.
+ */
+function upgradeEngram(versionCheck) {
+  const plat = process.platform;
+  if (plat === "darwin" && which("brew")) {
+    spawnCmd("brew", ["upgrade", "gentleman-programming/tap/engram"]);
+    return;
+  }
+  if (plat === "linux" || plat === "darwin") {
+    // Reemplaza el binario donde ya vive (si es escribible) para que no lo tape otro en el PATH.
+    if (installEngramFromTarball({ version: versionCheck.latest, replaceExisting: true })) return;
+  }
+  if (which("go")) {
+    spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
+    return;
+  }
+  warn("No pude auto-actualizar Engram (ni binario precompilado, ni Homebrew/Go). Descarga manual:");
+  info("  " + c.cyan(versionCheck.url));
 }
 
 /**
@@ -744,10 +759,13 @@ function fetchEngramReleases({ quiet = false } = {}) {
  * quedándose con el release estable más reciente que contenga el asset.
  * Devuelve null si no hay red/herramienta o no hay binario.
  */
-function resolveEngramAsset(platform, arch) {
+function resolveEngramAsset(platform, arch, version) {
   const res = fetchEngramReleases();
   if (!res) return null;
-  return pickEngramAsset(res.releases, platform, arch);
+  const releases = version
+    ? res.releases.filter((r) => r && r.tag_name === "v" + version)
+    : res.releases;
+  return pickEngramAsset(releases, platform, arch);
 }
 
 /**
@@ -828,7 +846,7 @@ function findEngramBinary(dir) {
  * `engram setup <agente>` posteriores lo encuentren en esta misma corrida.
  * Node-14-safe: usa curl/wget + tar vía execFileSync (sin fetch global). Devuelve true si quedó listo.
  */
-function installEngramFromTarball() {
+function installEngramFromTarball({ version: wanted, replaceExisting = false } = {}) {
   const plat = process.platform;
   if (plat !== "linux" && plat !== "darwin") return false;
 
@@ -838,7 +856,7 @@ function installEngramFromTarball() {
     return false;
   }
 
-  const resolved = resolveEngramAsset(plat, process.arch);
+  const resolved = resolveEngramAsset(plat, process.arch, wanted);
   if (!resolved) {
     warn("No pude resolver un binario precompilado de Engram para tu SO/arch (¿sin red, sin curl/wget, o release sin assets?).");
     return false;
@@ -889,12 +907,28 @@ function installEngramFromTarball() {
       return false;
     }
 
-    const destDir = path.join(HOME, ".local", "bin");
+    let destDir = path.join(HOME, ".local", "bin");
+    if (replaceExisting) {
+      // Actualización: si engram ya está en un dir escribible, lo reemplazamos ahí mismo.
+      // (Si no, p. ej. /usr/local/bin sin permisos, caemos a ~/.local/bin y avisamos abajo.)
+      const existing = which("engram");
+      if (existing) {
+        try {
+          const real = fs.realpathSync(existing.split("\n")[0].trim());
+          fs.accessSync(path.dirname(real), fs.constants.W_OK);
+          destDir = path.dirname(real);
+        } catch { /* sin permiso o no resoluble: usa ~/.local/bin */ }
+      }
+    }
     const dest = path.join(destDir, "engram");
     try {
       ensureDir(destDir);
-      fs.copyFileSync(realSrc, dest);
-      fs.chmodSync(dest, 0o755);
+      // Copia a un temporal y renombra: reemplazar un binario en ejecución (MCP activo)
+      // con copyFile directo falla con ETXTBSY en Linux; rename es atómico.
+      const staging = dest + ".new";
+      fs.copyFileSync(realSrc, staging);
+      fs.chmodSync(staging, 0o755);
+      fs.renameSync(staging, dest);
     } catch (e) {
       warn(`No pude instalar el binario en ${destDir} (${e.message}).`);
       return false;
@@ -905,6 +939,14 @@ function installEngramFromTarball() {
     if (!onPath) process.env.PATH = destDir + path.delimiter + (process.env.PATH || "");
 
     ok(`Engram instalado en ${c.bold(dest)}.`);
+    if (replaceExisting) {
+      const active = which("engram");
+      let activeReal = null;
+      try { activeReal = active && fs.realpathSync(active.split("\n")[0].trim()); } catch { /* ignore */ }
+      if (activeReal && activeReal !== fs.realpathSync(dest)) {
+        warn(`Otro engram en ${c.bold(activeReal)} tapa al recién instalado. Actualízalo ahí (p. ej. con sudo) o quítalo del PATH.`);
+      }
+    }
     if (!onPath) {
       warn(`${c.bold(destDir)} no estaba en tu PATH. Para usar ${c.bold("engram")} fuera del agente, añádelo a tu shell:`);
       console.log(`    ${c.dim('export PATH="$HOME/.local/bin:$PATH"')}`);
@@ -2375,15 +2417,7 @@ export async function update(cwd, opts = {}) {
     if (versionCheck && versionCheck.canUpgrade) {
       warn(`Hay una nueva versión de Engram: ${c.bold(versionCheck.latest)} (tienes ${versionCheck.current}).`);
       if (await confirm("¿Actualizar Engram ahora?", false)) {
-        info("Actualizando Engram…");
-        if (process.platform === "darwin" && which("brew")) {
-          spawnCmd("brew", ["upgrade", "gentleman-programming/tap/engram"]);
-        } else if (which("go")) {
-          spawnCmd("go", ["install", "github.com/Gentleman-Programming/engram/cmd/engram@latest"]);
-        } else {
-          warn("No se puede auto-actualizar sin Homebrew (macOS) o Go. Descarga manual:");
-          info("  " + c.cyan(versionCheck.url));
-        }
+        upgradeEngram(versionCheck);
       }
     } else if (versionCheck && versionCheck.cooldown) {
       info(`Engram ${c.bold(versionCheck.latest)} está disponible pero aún en cooldown de seguridad (24h). Se activará el ${new Date(new Date(versionCheck.publishedAt).getTime() + 24*60*60*1000).toLocaleDateString()}.`);
