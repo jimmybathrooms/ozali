@@ -1,6 +1,6 @@
 # Instalar la skill `python-utilitario` en otro equipo (sin ozali)
 
-Guía temporal mientras se libera ozali con el comando `install-skill python-utilitario`.
+Guía temporal mientras se libera ozali con el comando `skills add python-utilitario`.
 La skill es solo una carpeta: instalarla es copiarla al directorio de skills del agente.
 
 ## Qué es
@@ -74,7 +74,7 @@ Debe activarse la skill `python-utilitario` y generar la carpeta completa.
 Ya no hará falta copiar nada a mano:
 
 ```bash
-npx ozali install-skill python-utilitario     # o: ozali install-skill --python
+npx ozali skills add python-utilitario     # o: ozali skills add --python
 ```
 
 Opciones: `--scope project|global` (global por defecto) y `--agent claude-code|opencode|both`.

@@ -1336,12 +1336,41 @@ test("doctor avisa deriva en Reglas de negocio cuando el código cambió desde e
   }
 });
 
-// ---- install-skill (pool de grill) -------------------------------------------
+// ---- skills (subcomandos y alias deprecados) ---------------------------------
 
-test("install-skill --list muestra el pool de grill", () => {
+test("skills sin subcomando muestra el uso y subcomando desconocido falla", () => {
   const dir = tmpProject();
   try {
-    const { stdout } = run(["install-skill", "--list"], dir);
+    const { stdout } = run(["skills"], dir);
+    assert.match(stdout, /install\|add\|list/);
+    const bad = run(["skills", "nada"], dir, true);
+    assert.notEqual(bad.code, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("alias deprecados install-skill / install-skills avisan y siguen funcionando", () => {
+  const dir = tmpProject();
+  try {
+    const one = run(["install-skill", "--list"], dir);
+    assert.match(one.stdout, /deprecado/);
+    assert.match(one.stdout, /ozali skills add/);
+    assert.match(one.stdout, /grill-me/);
+    const many = run(["install-skills", "--agent", "claude-code", "--scope", "project"], dir);
+    assert.match(many.stdout, /deprecado/);
+    assert.match(many.stdout, /ozali skills install/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- skills add (pool de grill) -------------------------------------------
+
+test("skills list muestra el pool de grill", () => {
+  const dir = tmpProject();
+  try {
+    const { stdout } = run(["skills", "list"], dir);
     assert.match(stdout, /pool de grill/, "imprime la cabecera del pool");
     for (const s of ["grill-me", "grilling", "grill-with-docs", "domain-modeling"]) {
       assert.match(stdout, new RegExp(s), `lista ${s}`);
@@ -1351,10 +1380,10 @@ test("install-skill --list muestra el pool de grill", () => {
   }
 });
 
-test("install-skill grill instala el set completo en el scope indicado", () => {
+test("skills add grill instala el set completo en el scope indicado", () => {
   const dir = tmpProject();
   try {
-    const { stdout } = run(["install-skill", "grill", "--agent", "claude-code", "--scope", "project"], dir);
+    const { stdout } = run(["skills", "add", "grill", "--agent", "claude-code", "--scope", "project"], dir);
     for (const s of ["grill-me", "grilling", "grill-with-docs", "domain-modeling"]) {
       assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", s, "SKILL.md")), `${s} instalada en project`);
     }
@@ -1364,10 +1393,10 @@ test("install-skill grill instala el set completo en el scope indicado", () => {
   }
 });
 
-test("install-skill con nombre desconocido avisa y no instala nada", () => {
+test("skills add con nombre desconocido avisa y no instala nada", () => {
   const dir = tmpProject();
   try {
-    const { code, stdout } = run(["install-skill", "no-existe", "--agent", "claude-code", "--scope", "project"], dir, true);
+    const { code, stdout } = run(["skills", "add", "no-existe", "--agent", "claude-code", "--scope", "project"], dir, true);
     assert.equal(code, 1, "sale con código 1");
     assert.match(stdout, /no existe/, "avisa que la skill no existe");
     assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "no-existe")), "no instala nada");
@@ -1376,12 +1405,12 @@ test("install-skill con nombre desconocido avisa y no instala nada", () => {
   }
 });
 
-// ---- install-skill python-utilitario (skill independiente) -------------------
+// ---- skills add python-utilitario (skill independiente) -------------------
 
-test("install-skill python-utilitario instala solo esa skill, con plantillas", () => {
+test("skills add python-utilitario instala solo esa skill, con plantillas", () => {
   const dir = tmpProject();
   try {
-    run(["install-skill", "python-utilitario", "--agent", "claude-code", "--scope", "project"], dir);
+    run(["skills", "add", "python-utilitario", "--agent", "claude-code", "--scope", "project"], dir);
     const base = path.join(dir, ".claude", "skills", "python-utilitario");
     assert.ok(fs.existsSync(path.join(base, "SKILL.md")), "SKILL.md instalada");
     assert.ok(fs.existsSync(path.join(base, "plantillas", "run_TEMPLATE.sh")), "plantillas copiadas");
@@ -1391,10 +1420,10 @@ test("install-skill python-utilitario instala solo esa skill, con plantillas", (
   }
 });
 
-test("install-skill --python equivale a pedir python-utilitario", () => {
+test("skills add --python equivale a pedir python-utilitario", () => {
   const dir = tmpProject();
   try {
-    run(["install-skill", "--python", "--agent", "claude-code", "--scope", "project"], dir);
+    run(["skills", "add", "--python", "--agent", "claude-code", "--scope", "project"], dir);
     assert.ok(fs.existsSync(path.join(dir, ".claude", "skills", "python-utilitario", "SKILL.md")));
     assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "grilling")), "no instala grill");
   } finally {
@@ -1402,12 +1431,12 @@ test("install-skill --python equivale a pedir python-utilitario", () => {
   }
 });
 
-test("install-skill grill no instala python-utilitario y --list lo muestra", () => {
+test("skills add grill no instala python-utilitario y --list lo muestra", () => {
   const dir = tmpProject();
   try {
-    run(["install-skill", "grill", "--agent", "claude-code", "--scope", "project"], dir);
+    run(["skills", "add", "grill", "--agent", "claude-code", "--scope", "project"], dir);
     assert.ok(!fs.existsSync(path.join(dir, ".claude", "skills", "python-utilitario")));
-    const { stdout } = run(["install-skill", "--list"], dir);
+    const { stdout } = run(["skills", "list"], dir);
     assert.match(stdout, /python-utilitario/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

@@ -53,7 +53,7 @@ Engram). Puedes aceptar los valores por defecto si dudas. Al terminar, deja list
 > Si tu proyecto ya tiene `.ozali/config.json` y la skill `cdk` generada, pero no tienes las
 > skills globales instaladas, corre:
 > ```bash
-> ozali install-skills
+> ozali skills install
 > ```
 > Esto instala `ozali`, `ozali-commit` y `skill-generator` en tu agente sin tocar la calibración.
 
@@ -89,7 +89,7 @@ Lleva el histórico y la memoria al repo de conocimiento del equipo. Tus compañ
 | Comando | Qué hace |
 |---|---|
 | `ozali init` | Prepara el proyecto (lo corres una vez por repo). |
-| `ozali install-skills` | Instala las skills globales (ozali, ozali-commit, skill-generator) cuando el repo ya está calibrado. |
+| `ozali skills install` | Instala las skills globales (ozali, ozali-commit, skill-generator) cuando el repo ya está calibrado. |
 | `ozali install-engram` | Instala (o reinstala) Engram y registra su MCP cuando saltaste la instalación en `init`. |
 | `ozali workspace` | Configura varios repos de una carpeta para trabajar en conjunto (lo corres en la carpeta raíz). |
 | `ozali doctor` | Revisa que todo esté bien. Es solo lectura, no cambia nada. |

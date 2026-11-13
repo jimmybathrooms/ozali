@@ -14,10 +14,11 @@
 
 | Versión | Novedad |
 |---------|---------|
+| **v0.28.0** | **`ozali skills <install\|add\|list>`: un solo comando para las skills**: `install-skills` pasa a `ozali skills install` (skills base) e `install-skill` a `ozali skills add <skill>` (opcionales: pool de grill y `python-utilitario`), con `ozali skills list` en lugar de `--list`. `install-skills` e `install-skill` siguen funcionando como **alias deprecados** con aviso. |
 | **v0.27.1** | **`update` actualiza Engram en Linux sin Homebrew ni Go**: en Linux (p. ej. Ubuntu LTS) `ozali update`/`init` descargan el binario precompilado de la versión que pasó el cooldown de 24h, verifican su SHA-256 contra `checksums.txt` y lo reemplazan en su sitio de forma atómica (sin fallar si el MCP de Engram está corriendo); avisan si otro `engram` en el PATH lo tapa. Go queda como respaldo y el enlace manual como último recurso. |
 | **v0.27.0** | **Catálogo de UI afinado tras evaluarlo contra un catálogo real**: el blueprint y la Fase 2.6 definen "uso" (por plantilla y por código, con patrón que acepta etiquetas multilínea), añaden los estados `por código` e `interno` y la columna *No confundir con*, y piden tabla *del diseño al componente*, esqueleto de página con regla de desborde, directivas/pipes y librería base. Criterio de directorio compartido, modo no interactivo y migración opcional en `--ui` (modo actualizar). Pendiente P-014 con los huecos que quedan. |
 | **v0.26.0** | **`ozali usage`: tokens por hito de cdk sin plugins y bitácora de pendientes (contrato cdk v11)**: mide lo consumido dentro de cada hito leyendo los transcripts de Claude Code (entrada, salida, caché, total y duración; **costo siempre `N/A`**) y alimenta `06-uso-tokens.md` y `token-metrics.json`. Admite **varios hitos a la vez** (cambiar de hito pausa el anterior y lo deja pendiente), pausas y reanudación entre sesiones o días, y sesiones en paralelo sin mezclarse. `init`/`update` instalan hooks que arrancan al invocar `cdk` y pausan al cerrar la sesión; `ozali usage pending` y `doctor` listan los pendientes y marcan los olvidados (7 días). **`doctor`**: el Engram MCP de opencode es opcional cuando Claude Code también es agente (ya no sale en rojo) y se corrigió el falso positivo de *Configuración modificada después de generar los subagentes*. Una `cdk` v10 aparece como desactualizada y se migra con `ozali update`. |
-| **v0.25.0** | **`install-skill`: skill independiente `python-utilitario`**: `ozali install-skill python-utilitario` (o el flag `--python`, alias `python`) instala la skill que fabrica utilitarios Python autocontenidos (un solo `run_<nombre>.sh` con su propio `venv/`, log por corrida, `--dry-run` y códigos de salida estándar). Vive en `skill-python-utilitario/`, fuera del pool de grill (el alias `grill` no la instala); `--list` la muestra aparte. 3 tests nuevos y guía `docs/instalar-python-utilitario.md` para instalarla sin ozali. |
+| **v0.25.0** | **`install-skill`: skill independiente `python-utilitario`**: `ozali skills add python-utilitario` (o el flag `--python`, alias `python`) instala la skill que fabrica utilitarios Python autocontenidos (un solo `run_<nombre>.sh` con su propio `venv/`, log por corrida, `--dry-run` y códigos de salida estándar). Vive en `skill-python-utilitario/`, fuera del pool de grill (el alias `grill` no la instala); `--list` la muestra aparte. 3 tests nuevos y guía `docs/instalar-python-utilitario.md` para instalarla sin ozali. |
 | **v0.24.0** | **Revisor de UI solo para proyectos web + catálogo de componentes (contrato cdk v10)**: si el repo es web (Angular, React, Vue, Svelte, Next, Vite con UI), `cdk` genera el subagente opcional **`project-ui-reviewer`** (solo lectura: colores fijos fuera del tema, componentes duplicados frente al catálogo y textos sin i18n); en backend siguen los 8 roles. Nueva **Fase 2.6** y modo **`/ozali --ui`** generan o actualizan `.ai/context/ui-components.md` (selector, módulo, entradas/salidas y usos con conteo ejecutado; preserva lo escrito por el equipo). Al regenerar `cdk` se **conserva el contexto manual** de `.ai/context/`. `doctor` gana la fila *Revisor de UI* (solo web con cdk v10). Guía en [ui-catalog-blueprint.md](skill/references/ui-catalog-blueprint.md); una `cdk` v9 se migra sola con la skill `ozali`. |
 | **v0.23.0** | **Huella de autoría en todos los documentos**: los 6 docs por hito (`01-prompt-entrada` … `06-uso-tokens`) y los 3 de `ozali.log` llevan ahora encabezado con `Autor` (nombre y correo), **`GitHub: @login`** (vía `gh api user`, correo noreply o `git config github.user`; `N/A` si no se puede resolver), `Sesión`, `Rama`, `Commit` y `Creado`. **Contrato cdk v9**: una `cdk` v8 aparece como desactualizada en `doctor` y se migra sola con la skill `ozali` (solo hitos nuevos; no reescribe planes congelados). |
 | **v0.22.0** | **Cierre de hito sin abrir `rm` (P-008..P-011)**: nuevos comandos **`ozali state`** (`read` / `clear` / `write --hito --fase`) y **`ozali clean --hito <slug>`** (dry-run por defecto; borra `.ozali/tmp/<hito>/` y lo registrado en el `manifest.json`, con `realpath`, allowlist y rechazo de archivos rastreados por git). `init`/`update` suman `Write`/`Edit(.ozali/docs/**)` y `Write(.ozali/.session-state.json)` y ignoran `.ozali/tmp/`; **`doctor`** gana las filas *Permisos de cierre* y *Desechables de hitos*. **Contrato cdk v8**: el cierre usa Write (no heredocs), un comando por acción, `ozali state clear` + `ozali clean --yes` y fallbacks para CLI anterior; una `cdk` v7 aparece como desactualizada y se migra sola con la skill `ozali`. 28 tests nuevos. |
@@ -88,8 +89,8 @@ git clone <repo> && node ozali/cli/bin/ozali.mjs init
 
 ```bash
 ozali init           # detecta agente, instala skills ozali + ozali-commit, aísla histórico, configura Engram
-ozali install-skills # instala skills globales cuando el repo ya está calibrado y solo faltan las skills
-ozali install-skill  # instala skills del pool de grill (Matt Pocock) en el scope indicado
+ozali skills install # instala las skills base cuando el repo ya está calibrado y solo faltan las skills
+ozali skills add <skill> # agrega skills opcionales (pool de grill de Matt Pocock, python-utilitario) · ozali skills list
 ozali workspace      # multi-repo: escanea la carpeta raíz, remedia init/calibración y cablea la config conjunta
 ozali doctor         # health-check read-only (fuente de verdad, Engram, Cloud, versión de cdk, Strict TDD, frontmatters model:…)
 ozali update         # actualiza skills + permisos; avisa si cdk quedó atrás; detecta Engram y skills globales
@@ -125,7 +126,7 @@ permitido.
 `--tui` para el navegador interactivo, `--search "<texto>"` para buscar y `--general` para forzar el
 alcance. Sin Engram, audita el histórico local de `.ozali/docs/`.
 
-### `ozali install-skill` — pool de grill
+### `ozali skills add` — pool de grill
 
 `ozali` trae en su paquete un pool de skills de **grilling** de Matt Pocock
 ([mattpocock/skills](https://github.com/mattpocock/skills)) para afinar el **alcance, detalle y
@@ -134,11 +135,11 @@ las ramas del árbol de decisiones, y `grill-with-docs` además materializa el m
 `CONTEXT.md` y ADRs.
 
 ```bash
-ozali install-skill --list                # lista el pool
-ozali install-skill grill                 # instala el set completo (global, ambos agentes)
-ozali install-skill grill-with-docs       # una skill puntual
-ozali install-skill grill --scope project # en el repo actual (en vez de global)
-ozali install-skill grill --agent opencode
+ozali skills list                         # lista el pool
+ozali skills add grill                 # instala el set completo (global, ambos agentes)
+ozali skills add grill-with-docs       # una skill puntual
+ozali skills add grill --scope project # en el repo actual (en vez de global)
+ozali skills add grill --agent opencode
 ```
 
 Pool: `grill-me` (entrevista de planes/decisiones), `grilling` (primitiva reutilizable),
@@ -151,9 +152,9 @@ agente aplica. Reinicia tu agente después de instalar.
 estándar). No forma parte del pool de grill ni del alias `grill`; se instala aparte:
 
 ```bash
-ozali install-skill python-utilitario     # por nombre
-ozali install-skill --python              # flag equivalente (alias: "python")
-ozali install-skill --python --scope project --agent claude-code
+ozali skills add python-utilitario     # por nombre
+ozali skills add --python              # flag equivalente (alias: "python")
+ozali skills add --python --scope project --agent claude-code
 ```
 
 ### Workspaces multi-repo
@@ -215,7 +216,7 @@ existente, lo **migra automáticamente** al contrato vigente (eliminando `copsis
 `ozali-commit`) y estampa la versión — tus docs por hito y el plan congelado se conservan.
 
 > **Repo ya calibrado, solo faltan las skills?** Si el proyecto ya tiene `cdk` generado y `.ozali/config.json`,
-> pero no tienes las skills en el agente, usa `ozali install-skills` para instalar `ozali`, `ozali-commit`
+> pero no tienes las skills en el agente, usa `ozali skills install` para instalar `ozali`, `ozali-commit`
 > y `skill-generator` globalmente sin pasar por `init`.
 
 > **Commit del hito (`ozali-commit`):** `init`/`update` instalan la skill `ozali-commit`

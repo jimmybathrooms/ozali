@@ -1749,7 +1749,7 @@ export async function doctor(cwd, opts = {}) {
   }
   add("Skill ozali instalada", env.skill.installed, env.skill.installed ? env.skill.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   add("Skill skill-generator", env.skillGenerator.installed, env.skillGenerator.installed ? env.skillGenerator.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
-  add("Skill ozali-commit", env.ozaliCommit.installed, env.ozaliCommit.installed ? env.ozaliCommit.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init / ozali install-skills)");
+  add("Skill ozali-commit", env.ozaliCommit.installed, env.ozaliCommit.installed ? env.ozaliCommit.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init / ozali skills install)");
   // Skill cdk (la genera el agente): versión de contrato vs. la vigente del paquete.
   const cdkInfo = detectCdk(cwd);
   const cdkN = cdkCanonicalVersion();
@@ -2454,7 +2454,7 @@ export async function update(cwd, opts = {}) {
   // 4.55) Verificar skills globales si el repo ya tiene config pero faltan skills
   if (cfg && !env.skill.installed) {
     warn("Skill ozali no instalada globalmente.");
-    info("Puedes instalar las skills con: " + c.bold("ozali install-skills") + " (o ozali init si el repo no está calibrado).");
+    info("Puedes instalar las skills con: " + c.bold("ozali skills install") + " (o ozali init si el repo no está calibrado).");
   }
 
   // 4.6) Obsidian check
@@ -2611,7 +2611,7 @@ function cdkCanonicalVersion() {
  * skills a nivel de agente.
  */
 export async function installSkills(cwd, opts = {}) {
-  step("ozali install-skills — instalar skills globales");
+  step("ozali skills install — instalar skills base");
   const env = detectAll(cwd);
 
   const scope = opts.scope || "global";
@@ -2674,7 +2674,7 @@ export const STANDALONE_SKILLS = {
 /** Alias cortos → nombre real de la skill independiente. */
 const STANDALONE_ALIASES = { python: "python-utilitario" };
 
-/** Carpeta de origen (en el paquete) de una skill instalable por `install-skill`. */
+/** Carpeta de origen (en el paquete) de una skill instalable por `skills add`. */
 function skillSource(skill) {
   return STANDALONE_SKILLS[skill] || path.join(SKILL_GRILL_SRC, skill);
 }
@@ -2703,21 +2703,21 @@ function resolveInstallableSkills(requested, { python = false } = {}) {
  * (global por defecto), para Claude Code y/o opencode según --agent.
  *
  * Uso:
- *   ozali install-skill grill                 # set completo (alias)
- *   ozali install-skill grill-with-docs       # una skill
- *   ozali install-skill grill --list          # lista el pool
- *   ozali install-skill grill --scope project # en el repo actual
+ *   ozali skills add grill                 # set completo (alias)
+ *   ozali skills add grill-with-docs       # una skill
+ *   ozali skills add grill --list          # lista el pool
+ *   ozali skills add grill --scope project # en el repo actual
  */
 export async function installSkill(cwd, opts = {}) {
-  step("ozali install-skill — instalar skills de grill (pool ozali)");
+  step("ozali skills add — instalar skills opcionales (pool de grill e independientes)");
   const env = detectAll(cwd);
 
   if (opts.list) {
     info(`Skills en el pool de grill (${GRILL_POOL.length}):`);
     for (const s of GRILL_POOL) ok(`- ${s}`);
-    info('Usa "ozali install-skill grill" para instalarlas todas.');
+    info('Usa "ozali skills add grill" para instalarlas todas.');
     info(`Skills independientes (${Object.keys(STANDALONE_SKILLS).length}):`);
-    for (const s of Object.keys(STANDALONE_SKILLS)) ok(`- ${s}  (ozali install-skill ${s}  ·  ozali install-skill --python)`);
+    for (const s of Object.keys(STANDALONE_SKILLS)) ok(`- ${s}  (ozali skills add ${s}  ·  ozali skills add --python)`);
     return 0;
   }
 
@@ -2730,7 +2730,7 @@ export async function installSkill(cwd, opts = {}) {
   const skills = resolveInstallableSkills(requested, { python: !!opts.python });
   if (opts.python && requested.length === 0) skills.splice(0, skills.length, "python-utilitario");
   if (skills.length === 0) {
-    err('No hay skills que instalar. Usa "ozali install-skill grill", "ozali install-skill --python" o --list.');
+    err('No hay skills que instalar. Usa "ozali skills add grill", "ozali skills add --python" o "ozali skills list".');
     return 1;
   }
 

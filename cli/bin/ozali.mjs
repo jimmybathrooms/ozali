@@ -2,7 +2,7 @@
 // ozali — CLI plug-n-play (Node, CERO dependencias, SIN lifecycle scripts).
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
-import { c, err, pkgVersion } from "../lib/util.mjs";
+import { c, err, warn, pkgVersion } from "../lib/util.mjs";
 import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, installSkill, dashboard, stateCmd, cleanCmd, usageCommand } from "../lib/commands.mjs";
 
 const HELP = `
@@ -14,19 +14,19 @@ ${c.bold("Uso:")}
 ${c.bold("Comandos:")}
   init      Detecta el agente (Claude Code/opencode), instala las skills ozali y
             ozali-commit, aísla el histórico, configura Engram y el repo de conocimiento.
-  install-skills
-            Instala las skills ozali, ozali-commit y skill-generator en el scope
-            indicado (global por defecto). Úsalo cuando el repo ya está calibrado y
-            solo faltan las skills a nivel de agente.
+  skills    Gestiona las skills de ozali. Subcomandos:
+              install   Instala las skills base (ozali, ozali-commit, skill-generator) en el
+                        scope indicado (global por defecto). Úsalo cuando el repo ya está
+                        calibrado y solo faltan las skills a nivel de agente.
+              add       Agrega skills opcionales para alimentar el proyecto: las del pool de
+                        grill (grill-me, grilling, grill-with-docs, domain-modeling; alias
+                        "grill" = set completo) y las independientes (python-utilitario o
+                        --python). Uso: ozali skills add <skill>…
+              list      Lista las skills opcionales disponibles.
+            (install-skills / install-skill siguen funcionando como alias deprecados.)
   install-engram
             Instala (o reinstala) Engram bajo demanda, registra su MCP en el agente
             y activa modo hybrid. Úsalo cuando saltaste la instalación en init.
-  install-skill
-            Instala skills del pool de grill (Matt Pocock) en el scope indicado
-            (global por defecto). Uso: ozali install-skill <skill>… donde <skill>
-            es una del pool (grill-me, grilling, grill-with-docs, domain-modeling)
-            o el alias "grill" para el set completo. Con --list muestra el pool.
-            También instala skills independientes: python-utilitario (o --python).
   workspace Multi-repo: toma los repos de la carpeta raíz (y los folders de un
             *.code-workspace de VSCode/Antigravity), remedia los que no tienen ozali init,
             guía la calibración y escribe la config para trabajar en conjunto.
@@ -68,8 +68,8 @@ ${c.bold("Opciones comunes:")}
    --no-jarvis          (init/update) No crear/refrescar el orquestador ozali-jarvis.
    --rollback           (update) Restaura skills desde su backup más reciente.
    --skills             (update) Fuerza actualización de skills aunque esté frozen.
-   --list               (install-skill) Lista las skills del pool de grill y las independientes.
-   --python             (install-skill) Instala la skill python-utilitario (independiente del pool de grill).
+   --list               (skills add) Lista las skills del pool de grill y las independientes (= skills list).
+   --python             (skills add) Instala la skill python-utilitario (independiente del pool de grill).
    --hito <slug>        (state write / clean) Slug del hito.
    --fase <fase>        (state write) analysis_done | plan_approved | execution_done | testing_done | completed.
    --fix                (doctor) Auto-remedia problemas detectados (repo de conocimiento, TDD…).
@@ -138,6 +138,31 @@ function parseArgs(argv) {
   return opts;
 }
 
+/**
+ * `ozali skills <install|add|list>`. Reusa installSkills/installSkill, que leen sus
+ * argumentos posicionales desde opts._.slice(1): por eso se quita el subcomando de opts._.
+ */
+async function skillsCmd(cwd, opts) {
+  const sub = opts._[1];
+  if (!sub) {
+    console.log(`${c.bold("Uso:")} ozali skills <install|add|list>
+  install          Skills base (ozali, ozali-commit, skill-generator). Global por defecto.
+  add <skill>…     Skills opcionales (grill, grill-me, grilling, grill-with-docs,
+                   domain-modeling, python-utilitario). Con --python o sin nombre ver "list".
+  list             Lista las skills opcionales disponibles.`);
+    return 0;
+  }
+  const rest = { ...opts, _: ["skills", ...opts._.slice(2)] };
+  switch (sub) {
+    case "install": return await installSkills(cwd, rest);
+    case "add": return await installSkill(cwd, rest);
+    case "list": return await installSkill(cwd, { ...rest, list: true });
+    default:
+      err(`subcomando desconocido "${sub}". Usa: ozali skills install | add | list`);
+      return 1;
+  }
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cmd = opts._[0];
@@ -161,8 +186,14 @@ async function main() {
     case "state": return await stateCmd(cwd, opts);
     case "usage": return await usageCommand(cwd, opts);
     case "clean": return await cleanCmd(cwd, opts);
-    case "install-skills": return await installSkills(cwd, opts);
-    case "install-skill": return await installSkill(cwd, opts);
+    case "skills": return await skillsCmd(cwd, opts);
+    // Alias deprecados (antes de v0.28.0): se conservan para no romper docs ni scripts.
+    case "install-skills":
+      warn(`${c.bold("install-skills")} está deprecado: usa ${c.bold("ozali skills install")}.`);
+      return await installSkills(cwd, opts);
+    case "install-skill":
+      warn(`${c.bold("install-skill")} está deprecado: usa ${c.bold("ozali skills add")} (o ${c.bold("ozali skills list")}).`);
+      return await installSkill(cwd, opts);
     case "install-engram": return await installEngramCmd(cwd, opts);
     default:
       err(`comando desconocido "${cmd}". Usa ${c.bold("ozali --help")}.`);
