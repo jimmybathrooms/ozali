@@ -2130,3 +2130,15 @@ test("detectConfigStale: segundos de diferencia no son stale; una edición poste
     assert.equal(r.configMtimeAfter, "3 h");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("la skill ozali-commit documenta --skip-ci con la marca [skip ci] que GitHub reconoce", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "project", "--knowledge-repo", path.join(dir, ".k")], dir);
+    const md = fs.readFileSync(path.join(dir, ".claude", "skills", "ozali-commit", "SKILL.md"), "utf8");
+    assert.match(md, /--skip-ci/);
+    assert.match(md, /\[skip ci\]/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

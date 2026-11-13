@@ -1,6 +1,6 @@
 ---
 name: ozali-commit
-description: Genera un "commit summary" convencional (feat/fix/hotfix/refactor) con prefijo, scope y descripción a partir de los cambios EN STAGE y commitea tras tu aprobación. Úsala cuando el usuario quiera "commitea", "haz el commit", "genera el mensaje de commit", "cierra el hito con commit", o cuando otra skill (p. ej. cdk) cierre un hito.
+description: Genera un "commit summary" convencional (feat/fix/hotfix/refactor) con prefijo, scope y descripción a partir de los cambios EN STAGE y commitea tras tu aprobación. Úsala cuando el usuario quiera "commitea", "haz el commit", "genera el mensaje de commit", "cierra el hito con commit", o cuando otra skill (p. ej. cdk) cierre un hito. Acepta `--skip-ci` para que el commit no dispare el CI/deploy (agrega `[skip ci]`).
 model: haiku
 ---
 
@@ -106,8 +106,30 @@ feat(cobranza): agrega validación de RFC en alta de cotización
 Co-authored-by: Claude Code <claude-opus-4@anthropic.com>
 ```
 
+### 3.6 Flag `--skip-ci` (opcional)
+
+Si la skill se invoca con **`--skip-ci`** (p. ej. `/ozali-commit --skip-ci`, o `cdk` lo pasa al cerrar
+un hito), el commit **no debe disparar el CI/deploy**: agrega la marca **`[skip ci]`** al **final de la
+primera línea** del mensaje.
+
+```
+ci(deploy): omite deploy en cambios solo de IA/ozali [skip ci]
+```
+
+**Reglas:**
+- Escríbela **exactamente** `[skip ci]` (con espacio). GitHub **no** reconoce `[skip-ci]` con guion:
+  el commit se vería omitido pero el workflow correría igual. (También valen `[ci skip]`, `[no ci]`,
+  `[skip actions]` y `[actions skip]`; usa siempre `[skip ci]` por consistencia.)
+- La primera línea sigue en **≤ 72 chars incluida la marca**: acorta la descripción, no la marca.
+- Sin el flag, **no** agregues la marca (nunca la pongas por iniciativa propia).
+- La marca va en el **mensaje de commit de la cabeza del push**: si se hacen varios commits y se sube
+  todo junto, solo cuenta el último.
+- **Avisa en el GATE** (una línea): *"`[skip ci]` omite TODO el CI del push (tests y deploy), no solo el
+  deploy. Úsalo solo en cambios sin impacto en el build."* No pidas confirmación extra: el GATE de
+  mensaje ya es la aprobación.
+
 ### 4. 🛑 GATE de mensaje
-Presenta el mensaje completo **como texto visible** y espera aprobación. Si el usuario pide ajustes,
+Presenta el mensaje completo (con `[skip ci]` si se pidió `--skip-ci`) **como texto visible** y espera aprobación. Si el usuario pide ajustes,
 itera. **No commitees** hasta el "ok".
 
 ### 5. Commitea
