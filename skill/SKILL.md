@@ -131,8 +131,10 @@ Antes de nada, verifica si hay un **hito pendiente** de `cdk` que necesite reanu
    - Si **diffieren** → **ignorar** el estado (tratar como hito nuevo). Registrar:
      *"State de rama `{state.rama}` ignorado — estamos en `{rama_actual}`."*
    - Si **coinciden** o el state no tiene campo `rama` (legado) → continuar con la evaluación.
-3. **Buscar estado en disco:** leer `.ozali/.session-state.json` si existe (fallback cuando
-   Engram no está disponible o como respaldo).
+3. **Buscar estado en disco:** `ozali state list` (JSON con todos los hitos pendientes, uno por
+   `.ozali/state/<hito>.json`) y, si el CLI es anterior, leer `.ozali/.session-state.json`
+   (fallback cuando Engram no está disponible o como respaldo). Varios hitos pendientes son normales:
+   muéstralos todos y deja que el usuario elija cuál retomar.
 4. **Decidir:**
    - Si **no hay estado** o la fase es `completed` → nuevo hito, continuar normalmente.
    - Si hay un hito **pendiente** (fase ≠ `completed`):
@@ -394,6 +396,13 @@ el documento 1 (análisis).
 4. **Si falta información** para fijar el umbral de "verde" (qué comando corre las pruebas, qué
    cuenta como pasar), **pregunta al usuario** lo mínimo. No inventes comandos ni umbrales.
 
+5. **Detecta `sette-mcp`** (bitácora de perfiles, contrato v12): si hay señales de que el equipo lo usa
+   (`~/.config/sette-mcp/`, o el MCP `sette` en `claude mcp list`), sugiere fijar
+   `telemetry.bitacoraPerfiles: "sette-mcp"` en `.ozali/config.json`; si no, déjalo en `docs`.
+   Si el MCP está registrado solo para otra carpeta (no carga en este repo), **sugiere** registrarlo
+   con scope `user` reusando el comando de su registro actual (`claude mcp get sette`). Solo
+   sugiere: no edites la config de MCP sin que el usuario lo pida.
+
 El resultado de esta fase entra al plan del GATE (Fase 5) como la sección **"Calibración de
 pruebas"** y condiciona el ciclo `executioners ⇄ tester` de `cdk` (Fase 6).
 
@@ -574,10 +583,14 @@ Solo tras la aprobación de la Fase 5. Genera:
        Si diffieren → **ignorar** el estado (tratar como hito nuevo). Si hay un hito pendiente
        (fase ≠ `completed`) y la rama coincide, preguntar al usuario si desea reanudar desde
        la fase encontrada;
+    - **bitácora de perfiles (contrato v12):** sección "Bitácora de perfiles" en el `SKILL.md` de `cdk`
+      y en `project-orchestrator`, gobernada por `telemetry.bitacoraPerfiles` (`sette-mcp` | `docs` |
+      `off`; default `docs`). Detalle en [`references/agents-blueprint.md`](references/agents-blueprint.md)
+      (orquestador, documenter, tester) y en [`references/cdk-contract.md`](references/cdk-contract.md) v12;
     - **cierre sin permisos amplios (contrato v8):** escribir los docs con Write/Edit (no heredocs),
       **un comando por acción** (nunca `rm`+`engram`+`cat >` juntos), persistir cada fase con
       `ozali state write --hito <slug> --fase <fase>` y, al llegar a `completed`, correr
-      `ozali state clear` y `ozali clean --hito <slug> --yes` (registrar el resultado en `05`). Los
+      `ozali state clear --hito <slug>` y `ozali clean --hito <slug> --yes` (registrar el resultado en `05`). Los
       desechables de `tester`/`executioners` viven en `.ozali/tmp/<hito>/` (o el scratchpad), con
       `manifest.json` si deben estar en el árbol. Si el CLI es anterior: sobrescribir el estado con
       `{"fase":"completed"}` vía Write y **listar** los desechables al usuario; nunca intentar `rm`;

@@ -93,6 +93,14 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
   recall-first** (convención §7): recuperación selectiva (no volcar toda la memoria), restauración
   desde `state`+`bitacora` tras compactación, y consulta `cdk/_project/token-metrics` al iniciar para
   ajustar la agresividad del recall.
+  3. **Bitácora de perfiles** (contrato v12): al **terminar** cada delegación registra una entrada
+     (`hito`, `perfil`, `modelo`, `motivoDelegacion`, `archivosTocados`, `queSeHizo`, `porQue`, `inicio`,
+     `fin`, `duracionSeg`, `tokens?`, `resultado`, `enLinea`) según `telemetry.bitacoraPerfiles` del
+     config: `docs` → tabla en `05`; `sette-mcp` → `sette_bitacora_registrar` + tabla en `05` (si la tool
+     no existe, degrada a `docs`); `off` → nada. Usa `duration_ms`/`usage` que reporte el host para el
+     subagente; solo si no hay, estima y marca `estimado`. Un rol que ejecuta él mismo sin lanzar
+     subagente se registra con `enLinea: true`. Al cierre, si el modo es `sette-mcp`, ofrece
+     `sette_bitacora_publicar` (con `vistaPrevia`) — nunca publica sin confirmación.
 - **Modo `--auto`:** si el hito se invocó con `--auto`, recorre el hito de punta a punta
   **sin prompts** —incluida la **lectura de rutas no contempladas** durante el análisis y la
   ejecución post-GATE— con el **único alto en el 🛑 GATE del plan**. Si algo cae **fuera de
@@ -133,7 +141,8 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
   por hito** con el **encabezado de identidad**, en `.ozali/docs/cdk/<hito>/`; el primero
   captura el **prompt de entrada** textual; consolida las salidas de
   owner/analyzer/executioners/proposer; **mantiene viva la bitácora** durante el ciclo y
-  cierra con el **uso de tokens**.
+  cierra con el **uso de tokens**. Vuelca la tabla de **perfiles delegados** del hito (misma fuente que
+  la bitácora de perfiles, contrato v12) en `06-uso-tokens.md`, separando *subagente real* de *en línea*.
 - **Entrada:** prompt del usuario + salidas de los demás roles + eventos del ciclo (dudas,
   decisiones, desvíos). **Salida:** `01-prompt-entrada.md`, `02-plan-aprobado.md`,
   `03-resumen-tecnico.md`, `04-resumen-usuario.md` (este último entendible y con casos de
@@ -159,6 +168,12 @@ Para cada subagente, `cdk` debe generar un `.claude/agents/<rol>.md` con frontma
   regresiones; reporta resultados. Reutiliza/heredar de `.ai/agents/tester.md` si existe.
 - **Desechables (contrato v8):** mismas reglas que executioners: `.ozali/tmp/<hito>/` o scratchpad, con
   `manifest.json` para lo que deba vivir en el árbol; el reporte de pruebas lista los que quedaron.
+- **Baseline y modo aislado (contrato v12):** antes de tocar nada corre la suite y clasifica el
+  resultado: **"suite no compila"** (errores de compilación/tipos; se listan) o **"N fallos
+  preexistentes"**. Si la suite no compila por specs ajenos al hito (`--include` no evita el type-check
+  global), genera `.ozali/tmp/<hito>/tsconfig.spec.json` (o el equivalente del runner) con **solo los
+  specs del hito**, lo registra en `manifest.json` y corre en modo aislado; lo reporta como hallazgo,
+  no lo arregla fuera de alcance.
 - **Entrada:** código de executioners + criterios del owner. **Salida:** reporte de pruebas
   (pass/fail + evidencia).
 - **Herramientas:** ejecución de pruebas (Read, Bash/PowerShell acotado).

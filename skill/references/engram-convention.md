@@ -270,6 +270,27 @@ tolerante a fallos de red.
   es anterior, lo **sobrescribe** con `{"fase":"completed"}` vía Write. Las fases intermedias se
   persisten con `ozali state write --hito <slug> --fase <fase>` y se leen con `ozali state read`.
 - Si no hay Engram (modo `docs`), este archivo es la **única fuente de reanudación**.
+- **Estado por hito (contrato v12):** la fuente es `.ozali/state/<hito>.json` (un archivo por hito,
+  gitignored); `.session-state.json` es el **espejo** del hito en curso. `ozali state list` muestra todos
+  los pendientes y `ozali state read|clear --hito <slug>` opera sobre uno. Un hito en `analysis_done` no
+  bloquea abrir otro.
+
+---
+
+### 4.6 Guardar memoria en otro proyecto (cross-project)
+
+Las tools `mem_*` quedan atadas al proyecto de la sesión: escribir en otro proyecto (p. ej. dejar una
+nota en `sette` desde una sesión de `biibiic`) falla con `session_project_mismatch`. **No** cambies el
+proyecto de la sesión ni dupliques la nota en el proyecto equivocado. Usa el CLI de Engram, un comando
+por nota:
+
+```bash
+engram save "<título>" "<contenido conciso, en español>" --project <proyecto-destino> --type <tipo>
+```
+
+Reglas: confirma antes el nombre exacto del destino (`mem_list_projects`); `scope: project`;
+no guardes secretos; y deja constancia en la bitácora `05` de que la escritura fue cross-project. Si
+el CLI no está, escribe la nota en el doc del hito y avisa al usuario: no se pierde, solo no se espeja.
 
 ---
 

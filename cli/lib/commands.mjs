@@ -30,6 +30,7 @@ const TEAM_CLOUD_PATH = (cwd) => path.join(cwd, ".ozali", "cloud.json");
 const GITIGNORE_ENTRIES = [
   ".ozali/backups/",
   ".ozali/.session-state.json",
+  ".ozali/state/",   // estado por hito (un archivo por hito, mismo carácter local que el state de sesión)
   ".ozali/metrics/",
   ".ozali/tmp/",   // desechables de hitos (P-010): los borra `ozali clean`, nunca se versionan
   ".engram/",
@@ -183,7 +184,17 @@ function defaultPathsConfig() {
     docsPath: ".ozali/docs",
     metricsPath: ".ozali/metrics",
     sessionState: ".ozali/.session-state.json",
+    stateDir: ".ozali/state",
   };
+}
+
+/** Valores válidos de `telemetry.bitacoraPerfiles` (bitácora de delegaciones a perfiles cdk). */
+const BITACORA_PERFILES_MODOS = ["sette-mcp", "docs", "off"];
+
+/** Modo de la bitácora de perfiles: `docs` por defecto (no depende de ningún MCP); valor inválido → `docs`. */
+export function bitacoraPerfilesModo(cfg) {
+  const v = cfg && cfg.telemetry && cfg.telemetry.bitacoraPerfiles;
+  return BITACORA_PERFILES_MODOS.includes(v) ? v : "docs";
 }
 
 /** Devuelve defaults de testing (se calibra en Fase 3.5 del bootstrap). */
@@ -276,6 +287,8 @@ async function initKnowledgeRepo(cwd, opts, extraConfig = {}, explicitRepo = nul
     ...defaultPathsConfig(),
     agents: (existing && existing.agents) ? existing.agents : defaultAgentsConfig(),
     testing: (existing && existing.testing) ? existing.testing : defaultTestingConfig(),
+    // Bitácora de perfiles cdk (contrato v12): `docs` no depende de ningún MCP; se conserva lo que el equipo fijó.
+    telemetry: (existing && existing.telemetry) ? existing.telemetry : { bitacoraPerfiles: "docs" },
     ...extraConfig,
   };
   // Normalizar: si extraConfig trajo memoryMode (legacy), convertir a mode.
@@ -3489,28 +3502,66 @@ export async function dashboard(cwd, opts = {}) {
 
 const SESSION_STATE_PATH = (cwd) => path.join(cwd, ".ozali", ".session-state.json");
 
-/** Escribe el estado de sesión de un hito en disco (sobrescribe). */
+/** Carpeta del estado por hito: un archivo `<hito>.json` por hito, para que abrir uno no pise a otro. */
+const STATE_DIR = (cwd) => path.join(cwd, ".ozali", "state");
+const HITO_STATE_PATH = (cwd, hito) => path.join(STATE_DIR(cwd), `${hito}.json`);
+
+/**
+ * Escribe el estado de un hito. Fuente de verdad: `.ozali/state/<hito>.json`. Además se refleja en
+ * `.ozali/.session-state.json` (el "hito en curso": lo que leen los cdk anteriores a la v12 y los
+ * micro-checkpoints de executioners). Sin `state.hito` solo escribe el espejo (compatibilidad).
+ */
 export function writeSessionState(cwd, state) {
-  const p = SESSION_STATE_PATH(cwd);
   const payload = {
     ...state,
     last_updated: new Date().toISOString(),
   };
+  if (payload.hito && HITO_SLUG_RE.test(payload.hito)) {
+    ensureDir(STATE_DIR(cwd));
+    writeJSON(HITO_STATE_PATH(cwd, payload.hito), payload);
+  }
+  const p = SESSION_STATE_PATH(cwd);
   ensureDir(path.dirname(p));
   writeJSON(p, payload);
 }
 
-/** Lee el estado de sesión de disco. Devuelve null si no existe. */
-export function readSessionState(cwd) {
+/** Lee el estado en curso (espejo). Con `hito`, el de ese hito. Devuelve null si no existe. */
+export function readSessionState(cwd, hito) {
+  if (hito) return HITO_SLUG_RE.test(hito) ? readJSON(HITO_STATE_PATH(cwd, hito)) : null;
   return readJSON(SESSION_STATE_PATH(cwd));
 }
 
-/** Borra el estado de sesión de disco (hito completado). */
-export function clearSessionState(cwd) {
-  const p = SESSION_STATE_PATH(cwd);
-  if (exists(p)) {
-    try { fs.unlinkSync(p); } catch { /* noop */ }
+/** Lista los estados por hito (más reciente primero). Por defecto omite los `completed`. */
+export function listSessionStates(cwd, { all = false } = {}) {
+  let names = [];
+  try { names = fs.readdirSync(STATE_DIR(cwd)).filter((n) => n.endsWith(".json")); } catch { /* sin carpeta */ }
+  const out = [];
+  for (const n of names) {
+    const st = readJSON(path.join(STATE_DIR(cwd), n));
+    if (!st || typeof st !== "object") continue;
+    if (!st.hito) st.hito = n.slice(0, -5);
+    if (!all && st.fase === "completed") continue;
+    out.push(st);
   }
+  // Estado legado (anterior a state/): un hito en curso que aún no tiene archivo propio.
+  const legacy = readJSON(SESSION_STATE_PATH(cwd));
+  if (legacy && legacy.hito && !out.some((s) => s.hito === legacy.hito) && !readJSON(HITO_STATE_PATH(cwd, legacy.hito)) && (all || legacy.fase !== "completed")) {
+    out.push(legacy);
+  }
+  return out.sort((a, b) => String(b.last_updated || "").localeCompare(String(a.last_updated || "")));
+}
+
+/**
+ * Borra el estado de un hito (completado). Con `hito`, solo ese y, si el espejo apuntaba a él, el
+ * espejo. Sin `hito`, el espejo y el archivo del hito al que apuntaba (comportamiento previo).
+ */
+export function clearSessionState(cwd, hito) {
+  const mirror = SESSION_STATE_PATH(cwd);
+  const rm = (p) => { if (exists(p)) { try { fs.unlinkSync(p); } catch { /* noop */ } } };
+  const cur = readJSON(mirror);
+  const target = hito || (cur && cur.hito);
+  if (target && HITO_SLUG_RE.test(target)) rm(HITO_STATE_PATH(cwd, target));
+  if (!hito || (cur && cur.hito === hito)) rm(mirror);
 }
 
 // ===================================================== ozali state ===========
@@ -3529,24 +3580,39 @@ function repoRoot(cwd) {
 export async function stateCmd(cwd, opts = {}) {
   const [, sub, ...extra] = opts._;
   const root = repoRoot(cwd);
+  const hitoOk = opts.hito === undefined || (typeof opts.hito === "string" && HITO_SLUG_RE.test(opts.hito));
   if (sub === "read" && extra.length === 0) {
+    if (!hitoOk) { err("state read: --hito <slug> inválido (a-z, 0-9 y guiones)."); return 1; }
     // Salida pura (JSON o `null`): la consume cdk para reanudar.
-    console.log(JSON.stringify(readSessionState(root)));
+    console.log(JSON.stringify(readSessionState(root, opts.hito)));
+    return 0;
+  }
+  if (sub === "list" && extra.length === 0) {
+    // JSON puro: array de hitos con estado (sin los `completed`, salvo --all).
+    console.log(JSON.stringify(listSessionStates(root, { all: Boolean(opts.all) })));
     return 0;
   }
   if (sub === "clear" && extra.length === 0) {
-    clearSessionState(root);
+    if (!hitoOk) { err("state clear: --hito <slug> inválido (a-z, 0-9 y guiones)."); return 1; }
+    clearSessionState(root, opts.hito);
     return 0;
   }
   if (sub === "write" && extra.length === 0) {
     if (!opts.hito || !HITO_SLUG_RE.test(opts.hito)) { err("state write: --hito <slug> requerido (a-z, 0-9 y guiones)."); return 1; }
     if (!HITO_FASES.includes(opts.fase)) { err(`state write: --fase debe ser una de ${HITO_FASES.join(", ")}.`); return 1; }
-    const prev = readSessionState(root) || {};
+    // Previo: el archivo del hito; si no existe, el espejo solo cuando era de este mismo hito (migración).
+    const mirror = readSessionState(root);
+    // Migración: un hito legado (solo en el espejo) se guarda en su archivo antes de que el espejo cambie de hito.
+    if (mirror && mirror.hito && mirror.hito !== opts.hito && HITO_SLUG_RE.test(mirror.hito) && !readSessionState(root, mirror.hito)) {
+      ensureDir(STATE_DIR(root));
+      writeJSON(HITO_STATE_PATH(root, mirror.hito), mirror);
+    }
+    const prev = readSessionState(root, opts.hito) || (mirror && mirror.hito === opts.hito ? mirror : {});
     // `symbolic-ref` cubre el repo recién iniciado (rama sin commits), donde `rev-parse HEAD` falla.
     writeSessionState(root, { ...prev, hito: opts.hito, fase: opts.fase, rama: gitInfo(root).branch || tryExec("git", ["symbolic-ref", "--short", "HEAD"], { cwd: root }) || prev.rama });
     return 0;
   }
-  err("uso: ozali state read | ozali state clear | ozali state write --hito <slug> --fase <fase>");
+  err("uso: ozali state read [--hito <slug>] | ozali state list [--all] | ozali state clear [--hito <slug>] | ozali state write --hito <slug> --fase <fase>");
   return 1;
 }
 

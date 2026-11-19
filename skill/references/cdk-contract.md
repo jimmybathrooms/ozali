@@ -1,4 +1,4 @@
-<!-- CDK_CONTRACT_VERSION: 11 -->
+<!-- CDK_CONTRACT_VERSION: 12 -->
 
 # Contrato de la skill `cdk` — versión y migración
 
@@ -8,7 +8,7 @@ mantiene) la skill `cdk`. La lee el **agente** (en la Fase 0.5 y la Fase 6 de
 Para subir el contrato: incrementa el número del marcador `CDK_CONTRACT_VERSION` de arriba y la
 prosa de abajo, y agrega una entrada al changelog.
 
-> **Versión de contrato vigente: `10`**
+> **Versión de contrato vigente: `12`**
 
 El número vive en **un solo lugar** (el marcador HTML de la primera línea, formato
 `CDK_CONTRACT_VERSION: <entero>`). No lo dupliques en otros archivos.
@@ -419,3 +419,49 @@ Un `cdk` conforme a la v11 debe, además de lo de v10:
   4. Reportar al usuario qué archivos se tocaron.
 
 - Estampar `cdk_contract_version: 11` en su frontmatter.
+
+### v12 — bitácora de perfiles (opcional), estado por hito y tester aislado
+Un `cdk` conforme a la v12 debe, además de lo de v11:
+
+- **Bitácora de perfiles.** Cada delegación del orquestador a un perfil (`project-analyzer`,
+  `executioners`, `tester`, `project-reviewer`…) se registra para medir qué perfiles se usan más, cuánto
+  tiempo consumen y por qué se delegan. El destino lo fija `.ozali/config.json` →
+  `telemetry.bitacoraPerfiles`:
+
+  | Valor | Comportamiento |
+  |---|---|
+  | `"docs"` (default si falta o es inválido) | Tabla de delegaciones en `05-bitacora-ejecucion.md` (sección *Delegaciones a perfiles*). No depende de ningún MCP. |
+  | `"sette-mcp"` | Además de la tabla en `05`, una entrada por delegación con `sette_bitacora_registrar`. Si la tool no está disponible, **degrada a `docs`** y lo anota; nunca bloquea. |
+  | `"off"` | No se registra nada. |
+
+  Campos de cada entrada: `hito`, `folio`, `proyecto`, `perfil`, `modelo`, `motivoDelegacion`,
+  `archivosTocados`, `queSeHizo`, `porQue`, `inicio`, `fin`, `duracionSeg`, `tokens?`,
+  `resultado` (`ok`/`parcial`/`fallo`) y `enLinea`.
+- **Tiempo real, no estimado.** Si el host reporta `duration_ms` / `usage` del subagente al terminar,
+  se usan esos valores; solo si no los reporta el orquestador estima inicio/fin y marca la entrada como
+  `estimado`.
+- **Subagente real vs en línea.** `enLinea: true` cuando el orquestador ejecutó el rol sin lanzar un
+  subagente (p. ej. por costo). El reporte los separa: también es una señal útil.
+- **`project-documenter`** vuelca la tabla de perfiles del hito en `06-uso-tokens.md` (sección
+  *Perfiles delegados*), con el mismo origen de datos que la bitácora.
+- **Estado por hito.** `ozali state write|read|clear --hito <slug>` y `ozali state list` operan sobre
+  `.ozali/state/<hito>.json`; abrir un hito **no pisa** a otro en `analysis_done`/`plan_approved`.
+  `.ozali/.session-state.json` pasa a ser el espejo del hito en curso (compatibilidad y micro-checkpoints).
+  Al iniciar, `cdk` corre `ozali state list` y ofrece retomar los pendientes. Al cerrar:
+  `ozali state clear --hito <slug>`.
+- **`tester` — modo aislado y baseline.** Si la suite completa no compila (errores de tipos en specs
+  ajenos al hito; `--include` no evita el type-check de todo el proyecto), `tester` genera
+  `.ozali/tmp/<hito>/tsconfig.spec.json` (o equivalente del runner) con **solo los specs del hito** y lo
+  registra en `manifest.json`. El **baseline** distingue **"suite no compila"** (con la lista de errores)
+  de **"N fallos preexistentes"**; en el primer caso corre en modo aislado y lo reporta como hallazgo.
+
+- **Alcance de la migración v11 → v12** (automática, sin GATE — solo agrega instrucciones):
+  1. En `.claude/skills/cdk/SKILL.md`, agregar la sección **"Bitácora de perfiles"** (config
+     `telemetry.bitacoraPerfiles`) y `ozali state list` al arranque.
+  2. En `.claude/agents/project-orchestrator.md`, agregar **"Bitácora de perfiles"**.
+  3. En `project-documenter` (tabla en `06`) y `tester` (modo aislado + baseline), agregar lo descrito.
+  4. Si el repo tiene un bloque de bitácora agregado a mano, **conservarlo** (contexto manual, v10) y
+     reemplazarlo por la versión oficial solo si el usuario lo confirma.
+  5. Reportar al usuario qué archivos se tocaron.
+
+- Estampar `cdk_contract_version: 12` en su frontmatter.

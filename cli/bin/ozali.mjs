@@ -38,8 +38,9 @@ ${c.bold("Comandos:")}
   sync      Sincroniza el histórico (docs + Engram) con el repo de conocimiento.
   audit     Navega/audita la memoria de Engram del proyecto (o general).
   cloud     Gestiona Engram Cloud: status, upgrade, repair, dashboard, config.
-  state     Estado de sesión de un hito cdk (.ozali/.session-state.json): read | clear |
-            write --hito <slug> --fase <fase>. Permite cerrar un hito sin usar rm.
+  state     Estado por hito de cdk (.ozali/state/<hito>.json; espejo en .session-state.json):
+            read [--hito] | list [--all] | clear [--hito] | write --hito <slug> --fase <fase>.
+            Varios hitos pueden coexistir; permite cerrar un hito sin usar rm.
   clean     Borra los desechables de un hito (.ozali/tmp/<hito>/ y lo del manifiesto) sin rm.
             Dry-run por defecto; --yes aplica. Uso: ozali clean --hito <slug> [--yes].
   usage     Tokens por hito de cdk, sin plugins (lee los transcripts de Claude Code). Varios hitos
@@ -70,7 +71,8 @@ ${c.bold("Opciones comunes:")}
    --skills             (update) Fuerza actualización de skills aunque esté frozen.
    --list               (skills add) Lista las skills del pool de grill y las independientes (= skills list).
    --python             (skills add) Instala la skill python-utilitario (independiente del pool de grill).
-   --hito <slug>        (state write / clean) Slug del hito.
+   --hito <slug>        (state read|clear|write / clean) Slug del hito.
+   --all                (state list) Incluye también los hitos en fase completed.
    --fase <fase>        (state write) analysis_done | plan_approved | execution_done | testing_done | completed.
    --fix                (doctor) Auto-remedia problemas detectados (repo de conocimiento, TDD…).
   --import             (sync) Importa del repo de conocimiento a local.
@@ -126,6 +128,7 @@ function parseArgs(argv) {
     else if (a === "--list") opts.list = true;
     else if (a === "--python") opts.python = true;
     else if (a === "--fix") opts.fix = true;
+    else if (a === "--all") opts.all = true;
     else if (a === "--hito") opts.hito = argv[++i];
     else if (a === "--nota") opts.nota = argv[++i];
     else if (a === "--session") opts.session = argv[++i];

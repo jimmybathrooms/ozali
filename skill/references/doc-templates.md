@@ -302,6 +302,13 @@ usuario, en:
 ### <yyyy-mm-dd HH:MM:SS> — [tipo]
 - ...
 
+## Delegaciones a perfiles
+> Solo si `telemetry.bitacoraPerfiles` es `docs` o `sette-mcp` (contrato v12). Una fila por delegación.
+
+| # | Perfil | Modelo | Motivo | Archivos | Inicio → Fin | Duración | Tokens | Resultado | Ejecución |
+| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| 1 | <perfil> | <modelo> | <motivoDelegacion> | <archivosTocados> | <hh:mm:ss → hh:mm:ss> | <seg> (real / estimado) | <n / N/A> | ok / parcial / fallo | subagente / en línea |
+
 ## Cierre del ciclo
 - **Limpieza (contrato v8):** resultado de `ozali state clear` y de `ozali clean --hito <slug> --yes`
   (borrados / rechazados). Si el CLI es anterior, lista de desechables pendientes para el usuario.
@@ -345,6 +352,14 @@ usuario, en:
 | ¿Se reusó memoria? (recall-first) | sí / no |
 | Artefactos reusados | <p. ej. cdk/<hito>/analisis @ <commit>> |
 | Relectura evitada (estimada) | <n tokens / N/A> |
+
+## Perfiles delegados
+> Mismo origen que la tabla *Delegaciones a perfiles* de `05` (contrato v12). Omite la sección si
+> `telemetry.bitacoraPerfiles` es `off`.
+
+| Perfil | Usos | Subagente real | En línea | Tiempo total | Tiempo promedio | Tokens | Fallos |
+| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| <perfil> | <n> | <n> | <n> | <seg> | <seg> | <n / N/A> | <n> |
 
 ## Notas
 - Pausas de la corrida: <pauses> (retomada en otra sesión: sí / no)

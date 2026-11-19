@@ -230,10 +230,10 @@ test("doctor marca cdk al día cuando la versión de contrato coincide", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 11\n---\n# cdk\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 12\n---\n# cdk\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
-    assert.match(stdout, /contrato v11 \(al día\)/, "doctor marca cdk al día");
+    assert.match(stdout, /contrato v12 \(al día\)/, "doctor marca cdk al día");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -255,7 +255,7 @@ test("doctor NO marca copsis-commit si solo es mención negativa (nunca copsis-c
   const dir = tmpProject();
   try {
     initRepo(dir);
-    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 11\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
+    writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 12\n---\n# cdk\n5. **Commit:** invoca la skill **`ozali-commit`** (nunca `copsis-commit`) para el commit summary\n");
     const { stdout } = run(["doctor"], dir, true);
     assert.match(stdout, /Skill cdk/, "doctor reporta la fila Skill cdk");
     assert.doesNotMatch(stdout, /contiene copsis-commit/, "doctor NO debe marcar copsis-commit en menciones negativas");
@@ -1515,6 +1515,45 @@ test("state clear no acepta rutas: un argumento extra se rechaza y no borra nada
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("state por hito: dos hitos conviven, list los muestra y clear --hito borra solo uno", () => {
+  const dir = tmpProject();
+  try {
+    run(["state", "write", "--hito", "hito-a", "--fase", "analysis_done"], dir);
+    run(["state", "write", "--hito", "hito-b", "--fase", "plan_approved"], dir);
+    const hs = (a) => JSON.parse(run(["state", "list", ...a], dir).stdout).map((s) => s.hito).sort();
+    assert.deepEqual(hs([]), ["hito-a", "hito-b"], "abrir hito-b no pisa a hito-a");
+    assert.equal(JSON.parse(run(["state", "read", "--hito", "hito-a"], dir).stdout).fase, "analysis_done");
+    assert.equal(JSON.parse(run(["state", "read"], dir).stdout).hito, "hito-b", "el espejo apunta al último escrito");
+    assert.equal(run(["state", "clear", "--hito", "hito-b"], dir).code, 0);
+    assert.deepEqual(hs([]), ["hito-a"]);
+    assert.equal(run(["state", "read"], dir).stdout.trim(), "null", "clear --hito del hito en curso limpia el espejo");
+    assert.equal(run(["state", "read", "--hito", "hito-a"], dir).stdout.trim() === "null", false, "hito-a intacto");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state list oculta los completed salvo --all; rechaza slug inválido", () => {
+  const dir = tmpProject();
+  try {
+    run(["state", "write", "--hito", "viejo", "--fase", "completed"], dir);
+    run(["state", "write", "--hito", "nuevo", "--fase", "execution_done"], dir);
+    assert.deepEqual(JSON.parse(run(["state", "list"], dir).stdout).map((s) => s.hito), ["nuevo"]);
+    assert.equal(JSON.parse(run(["state", "list", "--all"], dir).stdout).length, 2);
+    assert.notEqual(run(["state", "read", "--hito", "../x"], dir, true).code, 0);
+    assert.notEqual(run(["state", "clear", "--hito", "../x"], dir, true).code, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state list recoge el estado legado (.session-state.json sin archivo propio)", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    fs.writeFileSync(STATE_FILE(dir), JSON.stringify({ hito: "legado", fase: "analysis_done" }));
+    assert.deepEqual(JSON.parse(run(["state", "list"], dir).stdout).map((s) => s.hito), ["legado"]);
+    run(["state", "write", "--hito", "otro", "--fase", "analysis_done"], dir);
+    assert.deepEqual(JSON.parse(run(["state", "list"], dir).stdout).map((s) => s.hito).sort(), ["legado", "otro"], "el legado se migra a su archivo antes de que el espejo cambie de hito");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("state con subcomando desconocido falla", () => {
   const dir = tmpProject();
   try {
@@ -1777,20 +1816,20 @@ test("doctor: 'Desechables de hitos' en verde sin .ozali/tmp/", () => {
 });
 
 // ---- P-011: contrato cdk v8 (cierre sin permisos amplios) -------------------
-test("doctor marca una cdk v7 como desactualizada frente al contrato v11", () => {
+test("doctor marca una cdk v7 como desactualizada frente al contrato v12", () => {
   const dir = tmpProject();
   try {
     initRepo(dir);
     writeCdkStub(dir, "---\nname: cdk\ncdk_contract_version: 7\n---\n# cdk\n");
     const line = run(["doctor"], dir, true).stdout.split("\n").find((l) => l.includes("Skill cdk"));
     assert.ok(line.includes("✖"), line);
-    assert.match(line, /contrato v7 < v11/);
+    assert.match(line, /contrato v7 < v12/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("cdk-contract.md declara la v8 con el cierre por ozali state / ozali clean y su migración", () => {
   const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "cdk-contract.md"), "utf8");
-  assert.match(txt, /CDK_CONTRACT_VERSION:\s*11/);
+  assert.match(txt, /CDK_CONTRACT_VERSION:\s*12/);
   const v8 = txt.slice(txt.indexOf("### v8"), txt.indexOf("### v9"));
   assert.ok(v8.length > 10, "hay sección ### v8");
   for (const needle of ["ozali state clear", "ozali clean --hito", ".ozali/tmp/", "manifest.json", "heredoc", "v7 → v8", "fase\":\"completed"]) {
@@ -1844,7 +1883,7 @@ test("doctor exige project-ui-reviewer en web con cdk v10 y lo ignora en backend
   try {
     for (const d of [web, back]) {
       initRepo(d);
-      writeCdkStub(d, "---\nname: cdk\ncdk_contract_version: 11\n---\n# cdk\n");
+      writeCdkStub(d, "---\nname: cdk\ncdk_contract_version: 12\n---\n# cdk\n");
     }
     fs.writeFileSync(path.join(web, "package.json"), JSON.stringify({ dependencies: { "@angular/core": "^17.0.0" } }));
     fs.writeFileSync(path.join(back, "pom.xml"), "<project/>");
@@ -2141,4 +2180,32 @@ test("la skill ozali-commit documenta --skip-ci con la marca [skip ci] que GitHu
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---- Contrato v12: bitácora de perfiles, estado por hito, tester aislado -----------------
+test("contrato v12 documenta la bitácora de perfiles (sette-mcp | docs | off), tiempo real, en línea, state por hito y tester aislado", () => {
+  const c = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "skill", "references", "cdk-contract.md"), "utf8");
+  for (const needle of ["### v12", "telemetry.bitacoraPerfiles", "sette_bitacora_registrar", "degrada a `docs`", "duration_ms", "enLinea", "Perfiles delegados", "ozali state list", ".ozali/state/<hito>.json", "tsconfig.spec.json", "suite no compila", "v11 → v12"]) {
+    assert.ok(c.includes(needle), `contrato v12 debe mencionar: ${needle}`);
+  }
+});
+
+test("blueprint y plantillas llevan la bitácora de perfiles al orquestador, al documenter (06) y al tester", () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "skill", "references");
+  const bp = fs.readFileSync(path.join(root, "agents-blueprint.md"), "utf8");
+  assert.match(bp, /Bitácora de perfiles/);
+  assert.match(bp, /sette_bitacora_registrar/);
+  assert.match(bp, /Baseline y modo aislado/);
+  const dt = fs.readFileSync(path.join(root, "doc-templates.md"), "utf8");
+  assert.match(dt, /## Delegaciones a perfiles/);
+  assert.match(dt, /## Perfiles delegados/);
+  assert.match(fs.readFileSync(path.join(root, "engram-convention.md"), "utf8"), /engram save .*--project <proyecto-destino>/);
+});
+
+test("init escribe telemetry.bitacoraPerfiles: docs por defecto y bitacoraPerfilesModo valida el valor", async () => {
+  const { bitacoraPerfilesModo } = await import("../lib/commands.mjs");
+  assert.equal(bitacoraPerfilesModo({}), "docs");
+  assert.equal(bitacoraPerfilesModo({ telemetry: { bitacoraPerfiles: "sette-mcp" } }), "sette-mcp");
+  assert.equal(bitacoraPerfilesModo({ telemetry: { bitacoraPerfiles: "off" } }), "off");
+  assert.equal(bitacoraPerfilesModo({ telemetry: { bitacoraPerfiles: "otro" } }), "docs", "valor inválido cae a docs");
 });
