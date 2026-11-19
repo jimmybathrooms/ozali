@@ -204,6 +204,9 @@ Guarda estos valores; se reutilizan en Fase 6 y en la documentación.
    - **Migra el histórico legado**: si existe `.copsis/docs/cdk/` (la ruta de `copsis-doctor`),
      **mueve** su contenido a `.ozali/docs/cdk/` (fusiona **por hito**, **sin sobrescribir** lo ya
      existente) y **borra** la carpeta `.copsis/` una vez vacía.
+   - **Conserva los parches locales** (`<!-- ozali:local-patch … -->`, contrato v12): al regenerar un
+     archivo de `cdk`, reinserta cada bloque en su ancla; nunca lo borres en silencio y, si choca con la
+     plantilla oficial, avisa y pregunta (regla 3 de la migración del contrato).
    - Aplica el resto de deltas del changelog (recall-first, telemetría, etc. según la versión).
    - **Estampa** `cdk_contract_version: N` en el frontmatter del `cdk`.
    - **Preserva** intactos los docs ya en `.ozali/docs/cdk/` (histórico por hito) y los planes

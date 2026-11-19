@@ -59,8 +59,15 @@ Al migrar un `cdk` legado o desactualizado, **siempre**:
    `.ozali/` de forma equivalente antes de borrar `.copsis/`.
 3. **Preserva** el histórico por hito ya en `.ozali/docs/cdk/` y los planes congelados
    (`02-plan-aprobado.md`): la migración del contrato **nunca** los borra ni reescribe.
-4. **Estampa** `cdk_contract_version: N` en el frontmatter del `cdk` migrado.
-5. **Reporta** al usuario, en texto, qué cambió (referencias migradas, docs reubicados de `.copsis/`
+4. **Conserva los parches locales** (contrato v12): todo bloque
+   `<!-- ozali:local-patch id=… -->` … `<!-- /ozali:local-patch -->` en `.claude/skills/cdk/SKILL.md` y en
+   `.claude/agents/*.md` (y su equivalente en `.opencode/`) se **mantiene** al regenerar el archivo:
+   reinsértalo en su ancla (la sección/línea que lo precedía). **Nunca** lo borres en silencio. Si la
+   plantilla oficial nueva ya trae el mismo contenido (la propuesta se integró) o choca con el bloque,
+   **avisa del conflicto y pregunta**; solo con confirmación se reemplaza el bloque por la versión
+   oficial (el bloque desaparece). Un bloque con `rechazada="motivo"` se queda local tal cual.
+5. **Estampa** `cdk_contract_version: N` en el frontmatter del `cdk` migrado.
+6. **Reporta** al usuario, en texto, qué cambió (referencias migradas, docs reubicados de `.copsis/`
    a `.ozali/`, secciones actualizadas, versión nueva).
 
 ---
@@ -454,6 +461,22 @@ Un `cdk` conforme a la v12 debe, además de lo de v11:
   `.ozali/tmp/<hito>/tsconfig.spec.json` (o equivalente del runner) con **solo los specs del hito** y lo
   registra en `manifest.json`. El **baseline** distingue **"suite no compila"** (con la lista de errores)
   de **"N fallos preexistentes"**; en el primer caso corre en modo aislado y lo reporta como hallazgo.
+
+- **Mejoras de campo (parches locales).** Toda edición manual a un archivo generado de `cdk` va dentro
+  de un bloque marcado, para que sobreviva a la migración y se pueda proponer a ozali:
+
+  ```md
+  <!-- ozali:local-patch id=bitacora-perfiles autor=@usuario fecha=2026-11-19 -->
+  …contenido…
+  <!-- /ozali:local-patch -->
+  ```
+
+  Flujo (nada entra a las plantillas sin revisión de una persona): `ozali patch list` →
+  `ozali patch capture <id>` arma `.ozali/proposals/<id>/` (`diff.patch` + `PROPUESTA.md`) → completar la propuesta →
+  `ozali patch submit <id> --yes` abre un PR a `develop` (nunca `main`) con la etiqueta `from-field`, que
+  exige aprobación de un CODEOWNER → si se integra, la siguiente migración reemplaza el bloque por la
+  versión oficial; si se rechaza, `ozali patch reject <id> --motivo …` deja el bloque local con el
+  motivo en el marcador. `ozali doctor` lista los parches locales del repo.
 
 - **Alcance de la migración v11 → v12** (automática, sin GATE — solo agrega instrucciones):
   1. En `.claude/skills/cdk/SKILL.md`, agregar la sección **"Bitácora de perfiles"** (config

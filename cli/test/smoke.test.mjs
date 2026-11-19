@@ -2209,3 +2209,131 @@ test("init escribe telemetry.bitacoraPerfiles: docs por defecto y bitacoraPerfil
   assert.equal(bitacoraPerfilesModo({ telemetry: { bitacoraPerfiles: "off" } }), "off");
   assert.equal(bitacoraPerfilesModo({ telemetry: { bitacoraPerfiles: "otro" } }), "docs", "valor inválido cae a docs");
 });
+
+// ---- §3: ozali patch (list / capture / reject / submit) ----------------------------------
+const PATCH_SKILL = [
+  "---", "name: cdk", "cdk_contract_version: 12", "---", "# cdk", "", "## Flujo", "uno", "dos", "tres", "cuatro", "",
+  "<!-- ozali:local-patch id=bitacora-perfiles autor=@jaime fecha=2026-11-19 -->",
+  "## Bitácora de perfiles con sette-mcp", "registrar cada delegación", "<!-- /ozali:local-patch -->",
+  "", "## Cierre", "fin", "",
+].join("\n");
+
+function patchProject() {
+  const dir = tmpProject();
+  fs.mkdirSync(path.join(dir, ".claude", "skills", "cdk"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".claude", "skills", "cdk", "SKILL.md"), PATCH_SKILL);
+  return dir;
+}
+
+test("parseLocalPatches: lee atributos entrecomillados y reporta anidados / sin cerrar", async () => {
+  const { parseLocalPatches } = await import("../lib/patch.mjs");
+  const ok1 = parseLocalPatches('a\n<!-- ozali:local-patch id=x autor=@a rechazada="no aplica a todos" -->\nb\n<!-- /ozali:local-patch -->\n');
+  assert.equal(ok1.blocks.length, 1);
+  assert.equal(ok1.blocks[0].attrs.rechazada, "no aplica a todos");
+  assert.equal(ok1.errors.length, 0);
+  assert.equal(parseLocalPatches("<!-- ozali:local-patch id=x -->\nb\n").errors.length, 1, "sin cerrar");
+  assert.equal(parseLocalPatches("<!-- ozali:local-patch id=x -->\n<!-- ozali:local-patch id=y -->\n<!-- /ozali:local-patch -->\n").errors.length > 0, true, "anidado");
+});
+
+test("buildInsertionDiff produce un diff que git apply acepta sobre el archivo sin el bloque", async () => {
+  const { buildInsertionDiff, parseLocalPatches } = await import("../lib/patch.mjs");
+  const dir = tmpProject();
+  try {
+    const diff = buildInsertionDiff("SKILL.md", PATCH_SKILL, "bitacora-perfiles");
+    const { blocks } = parseLocalPatches(PATCH_SKILL);
+    const lines = PATCH_SKILL.split("\n");
+    const base = lines.filter((_, i) => i < blocks[0].start || i > blocks[0].end).join("\n");
+    fs.writeFileSync(path.join(dir, "SKILL.md"), base);
+    fs.writeFileSync(path.join(dir, "d.patch"), diff);
+    execFileSync("git", ["apply", "--check", "d.patch"], { cwd: dir });
+    execFileSync("git", ["apply", "d.patch"], { cwd: dir });
+    assert.equal(fs.readFileSync(path.join(dir, "SKILL.md"), "utf8"), PATCH_SKILL, "aplicar el diff reconstruye el archivo con el parche");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("patch list y capture: arman .ozali/proposals/<id>/ con diff.patch y PROPUESTA.md; submit exige completarla", () => {
+  const dir = patchProject();
+  try {
+    assert.match(run(["patch", "list"], dir).stdout, /bitacora-perfiles/);
+    const cap = run(["patch", "capture", "bitacora-perfiles", "--hito", "razon-social"], dir);
+    assert.match(cap.stdout, /\.ozali\/proposals\/bitacora-perfiles/);
+    const pdir = path.join(dir, ".ozali", "proposals", "bitacora-perfiles");
+    const md = fs.readFileSync(path.join(pdir, "PROPUESTA.md"), "utf8");
+    assert.match(md, /@jaime/);
+    assert.match(md, /razon-social/);
+    assert.match(md, /v12/);
+    assert.match(fs.readFileSync(path.join(pdir, "diff.patch"), "utf8"), /^\+## Bitácora de perfiles con sette-mcp$/m);
+    // PROPUESTA.md tiene campos por completar → submit se niega (aun en dry-run)
+    const r = run(["patch", "submit", "bitacora-perfiles"], dir, true);
+    assert.notEqual(r.code, 0);
+    assert.match(r.stderr + r.stdout, /COMPLETAR/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("patch submit: dry-run por defecto, base develop y jamás main", () => {
+  const dir = patchProject();
+  try {
+    run(["patch", "capture", "bitacora-perfiles", "--motivo", "x"], dir);
+    const base = run(["patch", "submit", "bitacora-perfiles", "--force", "--repo", "org/ozali"], dir);
+    assert.match(base.stdout, /base:\s+develop/);
+    assert.match(base.stdout, /dry-run/);
+    const main = run(["patch", "submit", "bitacora-perfiles", "--force", "--repo", "org/ozali", "--base", "main"], dir, true);
+    assert.notEqual(main.code, 0);
+    assert.match(main.stderr + main.stdout, /nunca van a main/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("patch reject deja el bloque local con el motivo y capture lo respeta", () => {
+  const dir = patchProject();
+  try {
+    assert.equal(run(["patch", "reject", "bitacora-perfiles", "--motivo", "solo aplica a biibiic"], dir).code, 0);
+    const txt = fs.readFileSync(path.join(dir, ".claude", "skills", "cdk", "SKILL.md"), "utf8");
+    assert.match(txt, /rechazada="solo aplica a biibiic"/);
+    assert.match(txt, /registrar cada delegación/, "el contenido del bloque se conserva");
+    assert.match(run(["patch", "capture", "bitacora-perfiles"], dir).stdout, /rechazada/);
+    assert.ok(!fs.existsSync(path.join(dir, ".ozali", "proposals", "bitacora-perfiles")), "no captura una rechazada");
+    assert.notEqual(run(["patch", "reject", "bitacora-perfiles"], dir, true).code, 0, "falta --motivo");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("patch sin subcomando válido falla; capture de un id inexistente falla", () => {
+  const dir = patchProject();
+  try {
+    assert.notEqual(run(["patch"], dir, true).code, 0);
+    assert.notEqual(run(["patch", "capture", "no-existe"], dir, true).code, 0);
+    assert.notEqual(run(["patch", "submit", "../x"], dir, true).code, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("contrato v12 documenta los parches locales y su flujo de revisión", () => {
+  const c = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "cdk-contract.md"), "utf8");
+  for (const needle of ["ozali:local-patch", "Conserva los parches locales", "ozali patch capture", "ozali patch submit", "develop", "from-field", "CODEOWNER", "rechazada="]) {
+    assert.ok(c.includes(needle), `contrato debe mencionar: ${needle}`);
+  }
+});
+
+// ---- Ayuda de skills: catálogo con descripción de cada una ---------------------------------
+test("el catálogo describe toda skill instalable (pool de grill + independientes + base)", async () => {
+  const { SKILL_CATALOG } = await import("../lib/skills-catalog.mjs");
+  const { GRILL_POOL, STANDALONE_SKILLS } = await import("../lib/commands.mjs");
+  const names = new Set(SKILL_CATALOG.map((s) => s.name));
+  for (const n of [...GRILL_POOL, ...Object.keys(STANDALONE_SKILLS), "ozali", "ozali-commit", "skill-generator"]) {
+    assert.ok(names.has(n), `falta ${n} en skills-catalog.mjs`);
+  }
+  for (const s of SKILL_CATALOG) assert.ok(s.summary && s.when, `${s.name} sin descripción`);
+});
+
+test("`ozali skills` sin subcomando y `skills list` explican qué hace cada skill; --help las resume", () => {
+  const dir = tmpProject();
+  try {
+    const u = run(["skills"], dir).stdout;
+    for (const n of ["ozali-commit", "skill-generator", "grill-me", "grill-with-docs", "domain-modeling", "python-utilitario"]) assert.match(u, new RegExp(n));
+    assert.match(u, /Qué hace cada skill/);
+    assert.match(u, /ADRs/);
+    const l = run(["skills", "list"], dir).stdout;
+    assert.match(l, /Entrevista implacable/, "list trae la descripción, no solo el nombre");
+    assert.ok(!/skill-generator/.test(l), "list solo muestra las opcionales");
+    const h = run(["--help"], dir).stdout;
+    for (const n of ["grill-me", "domain-modeling", "python-utilitario"]) assert.match(h, new RegExp(n));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -3,6 +3,8 @@
 // Seguridad: sin dependencias ni scripts de instalación. Ejecuta seguro con
 // `pnpm dlx ozali` o `npx --ignore-scripts ozali`. Ver docs/security.md.
 import { c, err, warn, pkgVersion } from "../lib/util.mjs";
+import { patchCmd } from "../lib/patch.mjs";
+import { renderCatalog } from "../lib/skills-catalog.mjs";
 import { init, doctor, update, sync, audit, cloud, workspace, installEngramCmd, installSkills, installSkill, dashboard, stateCmd, cleanCmd, usageCommand } from "../lib/commands.mjs";
 
 const HELP = `
@@ -22,7 +24,11 @@ ${c.bold("Comandos:")}
                         grill (grill-me, grilling, grill-with-docs, domain-modeling; alias
                         "grill" = set completo) y las independientes (python-utilitario o
                         --python). Uso: ozali skills add <skill>…
-              list      Lista las skills opcionales disponibles.
+              list      Lista las skills opcionales y qué hace cada una (ozali skills sin
+                        subcomando muestra también las base).
+            Opcionales: grill-me, grilling, grill-with-docs, domain-modeling (entrevistas
+            para afinar planes y documentar el dominio) y python-utilitario (utilitarios
+            Python con su propio venv).
             (install-skills / install-skill siguen funcionando como alias deprecados.)
   install-engram
             Instala (o reinstala) Engram bajo demanda, registra su MCP en el agente
@@ -41,6 +47,10 @@ ${c.bold("Comandos:")}
   state     Estado por hito de cdk (.ozali/state/<hito>.json; espejo en .session-state.json):
             read [--hito] | list [--all] | clear [--hito] | write --hito <slug> --fase <fase>.
             Varios hitos pueden coexistir; permite cerrar un hito sin usar rm.
+  patch     Mejoras de campo a cdk: marca <!-- ozali:local-patch id=… -->, y luego
+            list | capture [<id>] | reject <id> --motivo | submit <id> [--yes]. Genera
+            .ozali/proposals/<id>/ y abre un PR a develop (dry-run salvo --yes). Nada entra
+            a las plantillas sin revisión humana.
   clean     Borra los desechables de un hito (.ozali/tmp/<hito>/ y lo del manifiesto) sin rm.
             Dry-run por defecto; --yes aplica. Uso: ozali clean --hito <slug> [--yes].
   usage     Tokens por hito de cdk, sin plugins (lee los transcripts de Claude Code). Varios hitos
@@ -129,6 +139,9 @@ function parseArgs(argv) {
     else if (a === "--python") opts.python = true;
     else if (a === "--fix") opts.fix = true;
     else if (a === "--all") opts.all = true;
+    else if (a === "--motivo") opts.motivo = argv[++i];
+    else if (a === "--repo") opts.repo = argv[++i];
+    else if (a === "--base") opts.base = argv[++i];
     else if (a === "--hito") opts.hito = argv[++i];
     else if (a === "--nota") opts.nota = argv[++i];
     else if (a === "--session") opts.session = argv[++i];
@@ -150,9 +163,12 @@ async function skillsCmd(cwd, opts) {
   if (!sub) {
     console.log(`${c.bold("Uso:")} ozali skills <install|add|list>
   install          Skills base (ozali, ozali-commit, skill-generator). Global por defecto.
-  add <skill>…     Skills opcionales (grill, grill-me, grilling, grill-with-docs,
-                   domain-modeling, python-utilitario). Con --python o sin nombre ver "list".
-  list             Lista las skills opcionales disponibles.`);
+  add <skill>…     Skills opcionales. Con --python instala python-utilitario; "grill" = las 4 del pool.
+  list             Lista las skills opcionales con qué hace cada una.
+  Opciones de install/add: --scope global|project · --agent claude-code|opencode|both
+
+${c.bold("Qué hace cada skill:")}
+${renderCatalog({ bold: c.bold, dim: c.dim }).join("\n")}`);
     return 0;
   }
   const rest = { ...opts, _: ["skills", ...opts._.slice(2)] };
@@ -189,6 +205,7 @@ async function main() {
     case "state": return await stateCmd(cwd, opts);
     case "usage": return await usageCommand(cwd, opts);
     case "clean": return await cleanCmd(cwd, opts);
+    case "patch": return await patchCmd(cwd, opts);
     case "skills": return await skillsCmd(cwd, opts);
     // Alias deprecados (antes de v0.28.0): se conservan para no romper docs ni scripts.
     case "install-skills":

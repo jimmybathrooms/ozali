@@ -17,6 +17,8 @@ import { detectAll, detectSourceOfTruth, detectBusiness, detectWebProject, detec
 } from "./detect.mjs";
 import { ask, confirm, select } from "./prompt.mjs";
 import { usageCmd, usageHook, pendingHitos } from "./usage.mjs";
+import { localPatchSummary } from "./patch.mjs";
+import { renderCatalog } from "./skills-catalog.mjs";
 
 const CONFIG_PATH = (cwd) => path.join(cwd, ".ozali", "config.json");
 const CONFIG_LOCAL_PATH = (cwd) => path.join(cwd, ".ozali", "config.local.json");
@@ -1776,6 +1778,12 @@ export async function doctor(cwd, opts = {}) {
       : `contrato v${cdkInfo.version} < v${cdkN} → migra con la skill 'ozali'`;
     add("Skill cdk", false, reason);
   }
+  // Parches locales (contrato v12): ediciones manuales marcadas que la migración conserva.
+  const lp = localPatchSummary(cwd);
+  if (lp.total) {
+    const rej = lp.rejected ? `, ${lp.rejected} rechazado(s)` : "";
+    add("Parches locales de cdk", lp.errors.length === 0, lp.errors.length ? `marcadores mal formados (${lp.errors[0]}) → ozali patch list` : `${lp.total} bloque(s): ${lp.ids.join(", ")}${rej} → ozali patch list`);
+  }
   // Revisor de UI (contrato v10): solo aplica a proyectos web con cdk ya al día.
   const webInfo = detectWebProject(cwd);
   if (cdkInfo.installed && cdkInfo.version != null && cdkInfo.version >= 10 && webInfo.web) {
@@ -2726,11 +2734,10 @@ export async function installSkill(cwd, opts = {}) {
   const env = detectAll(cwd);
 
   if (opts.list) {
-    info(`Skills en el pool de grill (${GRILL_POOL.length}):`);
-    for (const s of GRILL_POOL) ok(`- ${s}`);
-    info('Usa "ozali skills add grill" para instalarlas todas.');
-    info(`Skills independientes (${Object.keys(STANDALONE_SKILLS).length}):`);
-    for (const s of Object.keys(STANDALONE_SKILLS)) ok(`- ${s}  (ozali skills add ${s}  ·  ozali skills add --python)`);
+    // Catálogo con qué hace cada skill (fuente única: skills-catalog.mjs).
+    for (const ln of renderCatalog({ onlyOptional: true, bold: c.bold, dim: c.dim })) console.log(ln);
+    console.log("");
+    info('Instala con "ozali skills add <skill>" (o "ozali skills add grill" para las 4 del pool de grill).');
     return 0;
   }
 

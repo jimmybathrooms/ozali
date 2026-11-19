@@ -135,7 +135,8 @@ las ramas del árbol de decisiones, y `grill-with-docs` además materializa el m
 `CONTEXT.md` y ADRs.
 
 ```bash
-ozali skills list                         # lista el pool
+ozali skills                              # ayuda: qué hace cada skill (base y opcionales)
+ozali skills list                         # opcionales con su descripción
 ozali skills add grill                 # instala el set completo (global, ambos agentes)
 ozali skills add grill-with-docs       # una skill puntual
 ozali skills add grill --scope project # en el repo actual (en vez de global)
@@ -156,6 +157,21 @@ ozali skills add python-utilitario     # por nombre
 ozali skills add --python              # flag equivalente (alias: "python")
 ozali skills add --python --scope project --agent claude-code
 ```
+
+### `ozali patch` — mejoras de campo a `cdk`
+
+Las mejoras a `cdk` nacen en los repos de uso, pero sus archivos son generados. Marca la edición
+manual con `<!-- ozali:local-patch id=<slug> autor=@tu fecha=AAAA-MM-DD -->` … `<!-- /ozali:local-patch -->`:
+la migración del contrato la **conserva** (nunca la borra en silencio) y `ozali doctor` la lista.
+
+```bash
+ozali patch list                               # parches locales y su estado
+ozali patch capture <id> --hito <slug>         # arma .ozali/proposals/<id>/ (diff.patch + PROPUESTA.md)
+ozali patch submit <id>                        # dry-run; con --yes abre un PR a develop (etiqueta from-field)
+ozali patch reject <id> --motivo "..."         # si se rechaza, el bloque queda local con el motivo
+```
+
+Nada entra a las plantillas sin que una persona revise el PR (nunca contra `main`).
 
 ### Workspaces multi-repo
 
