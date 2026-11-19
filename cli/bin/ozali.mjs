@@ -49,8 +49,8 @@ ${c.bold("Comandos:")}
             Varios hitos pueden coexistir; permite cerrar un hito sin usar rm.
   patch     Mejoras de campo a cdk: marca <!-- ozali:local-patch id=… -->, y luego
             list | capture [<id>] | reject <id> --motivo | submit <id> [--yes]. Genera
-            .ozali/proposals/<id>/ y abre un PR a develop (dry-run salvo --yes). Nada entra
-            a las plantillas sin revisión humana.
+            .ozali/proposals/<id>/ y abre un issue en el repo de ozali (o un PR a develop con --pr;
+            fork automático si no tienes escritura). Dry-run salvo --yes. Nada entra sin revisión humana.
   clean     Borra los desechables de un hito (.ozali/tmp/<hito>/ y lo del manifiesto) sin rm.
             Dry-run por defecto; --yes aplica. Uso: ozali clean --hito <slug> [--yes].
   usage     Tokens por hito de cdk, sin plugins (lee los transcripts de Claude Code). Varios hitos
@@ -139,6 +139,7 @@ function parseArgs(argv) {
     else if (a === "--python") opts.python = true;
     else if (a === "--fix") opts.fix = true;
     else if (a === "--all") opts.all = true;
+    else if (a === "--pr") opts.pr = true;
     else if (a === "--motivo") opts.motivo = argv[++i];
     else if (a === "--repo") opts.repo = argv[++i];
     else if (a === "--base") opts.base = argv[++i];

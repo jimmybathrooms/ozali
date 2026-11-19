@@ -211,7 +211,7 @@ export async function patchCmd(cwd, opts = {}) {
   if (sub === "capture" && extra.length <= 1) return patchCapture(root, extra[0] || opts.id, opts);
   if (sub === "reject" && extra.length <= 1) return patchReject(root, extra[0] || opts.id, opts);
   if (sub === "submit" && extra.length === 1) return patchSubmit(root, extra[0], opts);
-  err("uso: ozali patch list | capture [<id>] [--hito <slug>] [--motivo <texto>] [--force] | reject <id> --motivo <texto> | submit <id> [--repo owner/repo] [--base develop] [--yes]");
+  err("uso: ozali patch list | capture [<id>] [--hito <slug>] [--motivo <texto>] [--force] | reject <id> --motivo <texto> | submit <id> [--pr] [--repo owner/repo] [--base develop] [--yes]");
   return 1;
 }
 
@@ -281,12 +281,26 @@ function patchReject(root, id, opts) {
 
 const REVIEW_CHECKLIST = `
 ---
-**Checklist del revisor (obligatorio; el PR exige aprobación de un CODEOWNER)**
+**Checklist del revisor**
 - [ ] ¿Aplica a todos los proyectos o es local?
 - [ ] ¿Rompe el contrato o exige subir la versión (\`cdk vN\`)?
 - [ ] ¿Hay tests de plantillas?
 - [ ] ¿Hay degradación si falta la dependencia (p. ej. sette-mcp)?
 `;
+
+/** Marcador que el workflow de triage busca para etiquetar el issue aunque quien lo abre no pueda poner etiquetas. */
+export const PROPOSAL_MARKER = (id) => `<!-- ozali:proposal id=${id} -->`;
+const BODY_MAX = 60000; // GitHub corta en 65 536 caracteres
+
+/** Cuerpo del issue/PR: marcador + PROPUESTA.md + diff (cerco de 4 backticks por si el diff trae ```) + checklist. */
+export function buildProposalBody(id, md, diff) {
+  const head = `${PROPOSAL_MARKER(id)}\n${md}\n`;
+  const tail = `${REVIEW_CHECKLIST}`;
+  let d = diff;
+  const room = BODY_MAX - head.length - tail.length - 200;
+  if (d.length > room) d = d.slice(0, Math.max(0, room)) + "\n… (diff truncado; el completo está en .ozali/proposals/" + id + "/diff.patch)\n";
+  return `${head}\n<details><summary>diff.patch</summary>\n\n\`\`\`\`diff\n${d}\`\`\`\`\n\n</details>\n${tail}`;
+}
 
 function patchSubmit(root, id, opts) {
   if (!PATCH_ID_RE.test(id)) { err(`patch submit: id inválido "${id}".`); return 1; }
@@ -297,21 +311,44 @@ function patchSubmit(root, id, opts) {
   if (md.includes(PENDIENTE) && !opts.force) { err(`patch submit: PROPUESTA.md aún tiene campos "${PENDIENTE}". Complétalos (o usa --force).`); return 1; }
   const repo = opts.repo || ozaliRepoSlug();
   if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) { err("patch submit: no pude resolver el repo de ozali (usa --repo owner/repo)."); return 1; }
+  const asPR = Boolean(opts.pr);
   const base = opts.base || "develop";
-  if (base === "main" || base === "master") { err("patch submit: las propuestas nunca van a main; la base es develop."); return 1; }
+  if (asPR && (base === "main" || base === "master")) { err("patch submit: las propuestas nunca van a main; la base es develop."); return 1; }
   const head = `proposal/${id}`;
-  console.log(`${c.bold("Propuesta:")} ${id}\n  repo:  ${repo}\n  base:  ${base}\n  rama:  ${head}\n  label: from-field\n  ruta:  docs/proposals/${id}/ (PROPUESTA.md + diff.patch)`);
-  if (!opts.yes) { info("dry-run: no se abrió ningún PR. Repite con --yes para publicarlo (es una acción saliente)."); return 0; }
+  const title = `proposal(${id}): mejora de campo`;
+  const body = buildProposalBody(id, md, fs.readFileSync(path.join(dir, "diff.patch"), "utf8"));
+
+  console.log(`${c.bold("Propuesta:")} ${id}\n  modo:  ${asPR ? "pull request (con tu implementación)" : "issue (petición de mejora; el maintainer la acepta y la desarrolla)"}\n  repo:  ${repo}`);
+  if (asPR) console.log(`  base:  ${base}\n  rama:  ${head}\n  ruta:  docs/proposals/${id}/ (PROPUESTA.md + diff.patch)`);
+  console.log("  label: from-field (el workflow de triage también la pone)");
+  if (!opts.yes) {
+    console.log(`\n${c.dim("──── cuerpo que se publicaría ────")}\n${body}${c.dim("──── fin ────")}`);
+    warn(`Esto se publica en ${repo}: incluye el nombre del proyecto, el hito y el contenido del parche. Si el repo es público, lo verá cualquiera. Revisa que no haya nada interno.`);
+    info("dry-run: no se publicó nada. Repite con --yes para enviarlo (es una acción saliente).");
+    return 0;
+  }
 
   if (!which("gh")) { err("patch submit: requiere GitHub CLI (`gh`) autenticado."); return 1; }
   if (tryExec("gh", ["auth", "status"]) === null) { err("patch submit: `gh` no está autenticado (gh auth login)."); return 1; }
-  if (tryExec("gh", ["api", `repos/${repo}/branches/${base}`, "--jq", ".name"]) === null) {
-    err(`patch submit: la rama base "${base}" no existe en ${repo} (o no hay acceso). Créala primero; nunca se propone a main.`);
-    return 1;
-  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-proposal-"));
-  const clone = path.join(tmp, "repo");
   try {
+    const bodyFile = path.join(tmp, "body.md");
+    fs.writeFileSync(bodyFile, body);
+    if (!asPR) {
+      const args = ["issue", "create", "--repo", repo, "--title", title, "--body-file", bodyFile];
+      let rc = spawnCmd("gh", [...args, "--label", "from-field"]);
+      // Sin permiso de triage la etiqueta no se puede aplicar: se reintenta sin ella (el workflow la pone).
+      if (rc !== 0) { warn("No se pudo aplicar la etiqueta from-field; reintento sin etiqueta (el workflow de triage la agrega)."); rc = spawnCmd("gh", args); }
+      if (rc !== 0) { err("patch submit: no se pudo abrir el issue."); return 1; }
+      ok(`Petición enviada a ${repo}. El maintainer la revisará (aceptada → milestone de release).`);
+      return 0;
+    }
+
+    if (tryExec("gh", ["api", `repos/${repo}/branches/${base}`, "--jq", ".name"]) === null) {
+      err(`patch submit: la rama base "${base}" no existe en ${repo} (o no hay acceso). Nunca se propone a main.`);
+      return 1;
+    }
+    const clone = path.join(tmp, "repo");
     if (spawnCmd("gh", ["repo", "clone", repo, clone, "--", "--depth", "1", "--branch", base]) !== 0) { err("patch submit: no se pudo clonar el repo."); return 1; }
     const git = (...a) => spawnCmd("git", a, { cwd: clone });
     if (git("checkout", "-b", head) !== 0) return 1;
@@ -320,14 +357,25 @@ function patchSubmit(root, id, opts) {
     for (const f of ["PROPUESTA.md", "diff.patch"]) fs.copyFileSync(path.join(dir, f), path.join(dest, f));
     if (git("add", "docs/proposals") !== 0) return 1;
     if (git("commit", "-q", "-m", `proposal(${id}): mejora de campo para revisión`) !== 0) return 1;
-    if (git("push", "-u", "origin", head) !== 0) { err("patch submit: no se pudo hacer push (¿sin permiso de escritura? usa un fork)."); return 1; }
-    const bodyFile = path.join(tmp, "body.md");
-    fs.writeFileSync(bodyFile, md + REVIEW_CHECKLIST);
-    const prArgs = ["pr", "create", "--repo", repo, "--base", base, "--head", head, "--title", `proposal(${id}): mejora de campo`, "--body-file", bodyFile];
+
+    // ¿Escritura directa o fork? Un usuario externo no puede hacer push al repo de ozali.
+    const canPush = tryExec("gh", ["api", `repos/${repo}`, "--jq", ".permissions.push"]) === "true";
+    let prHead = head;
+    let remote = "origin";
+    if (!canPush) {
+      const me = tryExec("gh", ["api", "user", "--jq", ".login"]);
+      if (!me) { err("patch submit: no pude resolver tu usuario de GitHub para el fork."); return 1; }
+      info("Sin permiso de escritura en el repo: uso un fork de tu cuenta.");
+      if (spawnCmd("gh", ["repo", "fork", repo, "--remote", "--remote-name", "fork"], { cwd: clone }) !== 0) { err("patch submit: no se pudo crear/usar el fork."); return 1; }
+      remote = "fork";
+      prHead = `${me}:${head}`;
+    }
+    if (git("push", "-u", remote, head) !== 0) { err("patch submit: no se pudo hacer push de la rama."); return 1; }
+    const prArgs = ["pr", "create", "--repo", repo, "--base", base, "--head", prHead, "--title", title, "--body-file", bodyFile];
     let rc = spawnCmd("gh", [...prArgs, "--label", "from-field"]);
-    if (rc !== 0) { warn("No se pudo aplicar la etiqueta from-field (¿no existe?); reintento sin etiqueta."); rc = spawnCmd("gh", prArgs); }
+    if (rc !== 0) { warn("No se pudo aplicar la etiqueta from-field; reintento sin etiqueta."); rc = spawnCmd("gh", prArgs); }
     if (rc !== 0) { err("patch submit: no se pudo abrir el PR."); return 1; }
-    ok(`PR abierto contra ${repo}@${base}. Requiere aprobación de un CODEOWNER.`);
+    ok(`PR abierto contra ${repo}@${base}. Lo revisa el CODEOWNER.`);
     return 0;
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }

@@ -2270,17 +2270,40 @@ test("patch list y capture: arman .ozali/proposals/<id>/ con diff.patch y PROPUE
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("patch submit: dry-run por defecto, base develop y jamás main", () => {
+test("patch submit: dry-run por defecto abre issue (con marcador y diff) y --pr apunta a develop, jamás main", () => {
   const dir = patchProject();
   try {
     run(["patch", "capture", "bitacora-perfiles", "--motivo", "x"], dir);
-    const base = run(["patch", "submit", "bitacora-perfiles", "--force", "--repo", "org/ozali"], dir);
-    assert.match(base.stdout, /base:\s+develop/);
-    assert.match(base.stdout, /dry-run/);
-    const main = run(["patch", "submit", "bitacora-perfiles", "--force", "--repo", "org/ozali", "--base", "main"], dir, true);
+    const issue = run(["patch", "submit", "bitacora-perfiles", "--force", "--repo", "org/ozali"], dir);
+    assert.match(issue.stdout, /modo:\s+issue/);
+    assert.match(issue.stdout, /<!-- ozali:proposal id=bitacora-perfiles -->/, "el marcador que el workflow de triage busca");
+    assert.match(issue.stdout, /\+## Bitácora de perfiles con sette-mcp/, "el diff viaja en el cuerpo");
+    assert.match(issue.stdout, /dry-run/);
+    assert.match(issue.stdout, /nombre del proyecto/, "avisa de la privacidad");
+    const pr = run(["patch", "submit", "bitacora-perfiles", "--force", "--repo", "org/ozali", "--pr"], dir);
+    assert.match(pr.stdout, /base:\s+develop/);
+    assert.match(pr.stdout, /pull request/);
+    const main = run(["patch", "submit", "bitacora-perfiles", "--force", "--repo", "org/ozali", "--pr", "--base", "main"], dir, true);
     assert.notEqual(main.code, 0);
-    assert.match(main.stderr + main.stdout, /nunca van a main/);
+    assert.match(main.stdout, /nunca van a main/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("buildProposalBody trunca diffs enormes y usa un cerco que no rompe con ``` dentro", async () => {
+  const { buildProposalBody } = await import("../lib/patch.mjs");
+  const big = buildProposalBody("x", "# md", "+" + "a".repeat(70000) + "\n");
+  assert.ok(big.length < 65000, "cabe en el límite de GitHub");
+  assert.match(big, /diff truncado/);
+  assert.match(buildProposalBody("x", "# md", "+```js\n"), /````diff/);
+});
+
+test("el workflow de triage etiqueta por el marcador y CONTRIBUTING documenta el flujo", () => {
+  const wf = fs.readFileSync(path.join(PKG_ROOT, ".github", "workflows", "triage-from-field.yml"), "utf8");
+  assert.match(wf, /ozali:proposal id=/);
+  assert.match(wf, /from-field/);
+  assert.match(wf, /pendiente-revision/);
+  const doc = fs.readFileSync(path.join(PKG_ROOT, "CONTRIBUTING.md"), "utf8");
+  for (const n of ["ozali patch submit", "milestone", "aceptada", "rechazada", "develop"]) assert.ok(doc.includes(n), `CONTRIBUTING debe mencionar ${n}`);
 });
 
 test("patch reject deja el bloque local con el motivo y capture lo respeta", () => {

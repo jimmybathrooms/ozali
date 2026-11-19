@@ -1,0 +1,26 @@
+name: Triage de mejoras de campo
+
+# Un issue abierto con `ozali patch submit` lleva el marcador <!-- ozali:proposal id=... -->.
+# Quien lo abre (un usuario externo) no puede poner etiquetas, así que las pone este workflow.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  etiquetar:
+    if: contains(github.event.issue.body, '<!-- ozali:proposal id=')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Etiquetar como mejora de campo pendiente de revisión
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUM: ${{ github.event.issue.number }}
+        run: |
+          gh label create from-field --repo "$REPO" --color 0E8A16 --description "Mejora propuesta desde un repo de uso (ozali patch submit)" 2>/dev/null || true
+          gh label create pendiente-revision --repo "$REPO" --color FBCA04 --description "Esperando triage del maintainer" 2>/dev/null || true
+          gh issue edit "$NUM" --repo "$REPO" --add-label from-field --add-label pendiente-revision

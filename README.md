@@ -167,11 +167,11 @@ la migración del contrato la **conserva** (nunca la borra en silencio) y `ozali
 ```bash
 ozali patch list                               # parches locales y su estado
 ozali patch capture <id> --hito <slug>         # arma .ozali/proposals/<id>/ (diff.patch + PROPUESTA.md)
-ozali patch submit <id>                        # dry-run; con --yes abre un PR a develop (etiqueta from-field)
+ozali patch submit <id>                        # dry-run (muestra el cuerpo); con --yes abre un issue de mejora (--pr: PR a develop, con fork)
 ozali patch reject <id> --motivo "..."         # si se rechaza, el bloque queda local con el motivo
 ```
 
-Nada entra a las plantillas sin que una persona revise el PR (nunca contra `main`).
+Nada entra a las plantillas sin que el maintainer lo acepte (milestone de release) y lo desarrolle; el flujo completo está en `CONTRIBUTING.md`.
 
 ### Workspaces multi-repo
 

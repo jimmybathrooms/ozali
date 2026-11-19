@@ -39,6 +39,28 @@ docs/                 seguridad, histórico de equipo, uso previsto
 - Si tocas la skill (`skill/`), verifica que los links a `references/` resuelven.
 - Conventional commits (`feat:`, `fix:`, `docs:`…). Termina los commits con el trailer del repo.
 
+## Mejoras de campo (propuestas desde repos que usan ozali)
+
+Quien usa `cdk` y encuentra algo que mejorar no edita este repo: lo marca en su proyecto y lo propone.
+
+**Usuario**
+1. Marca la edición manual con `<!-- ozali:local-patch id=<slug> autor=@tu fecha=AAAA-MM-DD -->` … `<!-- /ozali:local-patch -->`.
+2. `ozali patch capture <id> --hito <slug>` arma `.ozali/proposals/<id>/`; completa los campos "⚠️ COMPLETAR" de `PROPUESTA.md`.
+3. `ozali patch submit <id>` (dry-run: muestra el cuerpo exacto) y luego `--yes` abre un **issue** en este repo.
+   Con `--pr` abre un PR a `develop` con su implementación (hace fork si no tiene escritura).
+   Revisa antes que no haya nada interno: el issue incluye proyecto, hito y contenido del parche.
+
+**Maintainer**
+1. El workflow `triage-from-field` etiqueta el issue `from-field` + `pendiente-revision`.
+2. Triage con el checklist de la propuesta (¿aplica a todos?, ¿rompe contrato / sube `cdk vN`?, ¿hay tests de plantillas?, ¿degrada sin la dependencia?).
+3. **Aceptar:** etiqueta `aceptada`, quita `pendiente-revision` y asigna un **milestone** (`vX.Y.Z`): ese milestone es el stack de liberación.
+   **Rechazar:** etiqueta `rechazada` y comenta el motivo (el usuario lo guarda con `ozali patch reject <id> --motivo …`).
+4. **Desarrollo:** ramas hacia `develop` con `Closes #N` (los PR de `--pr` se revisan; exigen CODEOWNER).
+5. **Release:** con el milestone completo, `develop` → `main`, bump de versión y tag `vX.Y.Z` (ver Releases).
+   La siguiente migración de `cdk` reemplaza el bloque `local-patch` por la versión oficial.
+
+`develop` es la rama de integración (la CI corre en `main` y `develop`); `main` solo recibe releases.
+
 ## Releases
 
 Crear un tag `vX.Y.Z` que coincida con `package.json` dispara el workflow de publicación a npm

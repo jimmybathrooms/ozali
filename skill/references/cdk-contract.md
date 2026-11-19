@@ -472,11 +472,13 @@ Un `cdk` conforme a la v12 debe, además de lo de v11:
   ```
 
   Flujo (nada entra a las plantillas sin revisión de una persona): `ozali patch list` →
-  `ozali patch capture <id>` arma `.ozali/proposals/<id>/` (`diff.patch` + `PROPUESTA.md`) → completar la propuesta →
-  `ozali patch submit <id> --yes` abre un PR a `develop` (nunca `main`) con la etiqueta `from-field`, que
-  exige aprobación de un CODEOWNER → si se integra, la siguiente migración reemplaza el bloque por la
-  versión oficial; si se rechaza, `ozali patch reject <id> --motivo …` deja el bloque local con el
-  motivo en el marcador. `ozali doctor` lista los parches locales del repo.
+  `ozali patch capture <id>` arma `.ozali/proposals/<id>/` (`diff.patch` + `PROPUESTA.md`) → completar la
+  propuesta → `ozali patch submit <id> --yes` abre un **issue** en el repo de ozali (con `--pr`, un PR a
+  `develop`, nunca `main`, con fork si no hay escritura) → el workflow de triage lo etiqueta `from-field` →
+  el maintainer lo acepta (milestone de release) o lo rechaza (`rechazada` + motivo); los PR exigen un
+  CODEOWNER → se desarrolla en `develop` y sale en el release → la siguiente migración reemplaza el bloque
+  por la versión oficial; si se rechaza, `ozali patch reject <id> --motivo …` deja el bloque local con el
+  motivo en el marcador. `ozali doctor` lista los parches locales del repo. Detalle en `CONTRIBUTING.md`.
 
 - **Alcance de la migración v11 → v12** (automática, sin GATE — solo agrega instrucciones):
   1. En `.claude/skills/cdk/SKILL.md`, agregar la sección **"Bitácora de perfiles"** (config
