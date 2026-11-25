@@ -2213,7 +2213,40 @@ test("workspace avisa que está deprecado (y sigue funcionando)", () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-import { usageHooksRow } from "../lib/commands.mjs";
+test("usageHook es idempotente: disparar start y SessionEnd dos veces con la misma sesión no duplica ni reabre segmentos (hooks global + proyecto)", async () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    const start = JSON.stringify({ hook_event_name: "PreToolUse", session_id: "s1", tool_name: "Skill", tool_input: { skill: "cdk" } });
+    const end = JSON.stringify({ hook_event_name: "SessionEnd", session_id: "s1" });
+    await usageHook(dir, start); await usageHook(dir, start);
+    let segs = readLedgerT(dir).hitos["_sin-hito"].segments;
+    assert.equal(segs.length, 1, "start doble = un solo segmento");
+    await usageHook(dir, end);
+    const cerrado = readLedgerT(dir).hitos["_sin-hito"].segments[0].end;
+    assert.ok(cerrado, "primer SessionEnd cierra");
+    await usageHook(dir, end);
+    segs = readLedgerT(dir).hitos["_sin-hito"].segments;
+    assert.equal(segs.length, 1, "pause doble no crea segmentos");
+    assert.equal(segs[0].end, cerrado, "pause doble no cambia el cierre");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+import { usageHooksRow, usageHooksDuplicated } from "../lib/commands.mjs";
+
+test("usageHooksDuplicated: detecta hooks de usage tanto en ~/.claude como en el proyecto (issue #3)", () => {
+  const dir = tmpProject(); const home = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-home-"));
+  try {
+    const cmd = "command -v ozali >/dev/null 2>&1 && ozali usage hook || true";
+    const settings = JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: cmd }] }] } });
+    const put = (base) => { fs.mkdirSync(path.join(base, ".claude"), { recursive: true }); fs.writeFileSync(path.join(base, ".claude", "settings.json"), settings); };
+    assert.equal(usageHooksDuplicated(dir, home), false, "ninguno");
+    put(dir); assert.equal(usageHooksDuplicated(dir, home), false, "solo proyecto");
+    put(home); assert.equal(usageHooksDuplicated(dir, home), true, "global + proyecto");
+    fs.rmSync(path.join(dir, ".claude"), { recursive: true });
+    assert.equal(usageHooksDuplicated(dir, home), false, "solo global");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); }
+});
 
 test("usageHooksRow: detecta hooks de usage ausentes/parciales/completos y sugiere ozali update (issue #3)", () => {
   const dir = tmpProject();

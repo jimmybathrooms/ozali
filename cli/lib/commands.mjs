@@ -1899,6 +1899,10 @@ export async function doctor(cwd, opts = {}) {
   console.log("");
   if (bad === 0) ok("Todo en orden. ozali está listo para trabajar.");
   else warn(`${bad} punto(s) a atender. Revisa los ✖ de arriba.`);
+  if (usageHooksDuplicated(cwd)) {
+    info("Los hooks de " + c.bold("ozali usage hook") + " están en " + c.bold("~/.claude/settings.json") + " y en el proyecto: es redundante pero inofensivo (idempotente).");
+    info("  Quita los del global: los del proyecto se versionan y cubren a todo el equipo.");
+  }
 
   // Verificación: config.json más nuevo que los subagentes generados (config stale)
   const stale = detectConfigStale(cwd);
@@ -3669,6 +3673,15 @@ export function usageHooksRow(cwd) {
   return missing.length === 0
     ? { label: "Hooks de usage", good: true, detail: "PreToolUse, UserPromptSubmit, SessionEnd" }
     : { label: "Hooks de usage", good: false, detail: `faltan en .claude/settings.json: ${missing.join(", ")} → corre 'ozali update'` };
+}
+
+/**
+ * ¿Hay hooks de `ozali usage hook` tanto en `~/.claude/settings.json` como en el del proyecto?
+ * Es redundante pero inofensivo (`usageHook` es idempotente); `doctor` lo avisa para que se quite el global.
+ */
+export function usageHooksDuplicated(cwd, home = HOME) {
+  const has = (base) => JSON.stringify((readJSON(path.join(base, ".claude", "settings.json"), {}) || {}).hooks || {}).includes("ozali usage hook");
+  return path.resolve(cwd) !== path.resolve(home) && has(cwd) && has(home);
 }
 
 /**
