@@ -1837,6 +1837,19 @@ test("cdk-contract.md declara la v8 con el cierre por ozali state / ozali clean 
   }
 });
 
+test("cdk-contract.md: marcador, texto 'vigente' y último changelog declaran la misma versión", () => {
+  const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "cdk-contract.md"), "utf8");
+  const marker = txt.match(/CDK_CONTRACT_VERSION:\s*(\d+)/);
+  assert.ok(marker, "hay marcador CDK_CONTRACT_VERSION");
+  const prose = txt.match(/Versión de contrato vigente:\s*`(\d+)`/);
+  assert.ok(prose, "hay línea 'Versión de contrato vigente: `N`'");
+  const versions = [...txt.matchAll(/^### v(\d+)\b/gm)].map((m) => parseInt(m[1], 10));
+  assert.ok(versions.length > 0, "hay entradas ### vN en el changelog");
+  const last = Math.max(...versions);
+  assert.equal(parseInt(prose[1], 10), parseInt(marker[1], 10), "el texto 'vigente' coincide con el marcador");
+  assert.equal(last, parseInt(marker[1], 10), "la última entrada del changelog coincide con el marcador");
+});
+
 test("las plantillas por hito exigen huella de autoría (GitHub + commit) en los 6 documentos", () => {
   const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "doc-templates.md"), "utf8");
   assert.match(txt, /GitHub: @<login/);
