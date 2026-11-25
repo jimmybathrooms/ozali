@@ -91,7 +91,7 @@ Lleva el histórico y la memoria al repo de conocimiento del equipo. Tus compañ
 | `ozali init` | Prepara el proyecto (lo corres una vez por repo). |
 | `ozali skills install` | Instala las skills globales (ozali, ozali-commit, skill-generator) cuando el repo ya está calibrado. |
 | `ozali install-engram` | Instala (o reinstala) Engram y registra su MCP cuando saltaste la instalación en `init`. |
-| `ozali workspace` | Configura varios repos de una carpeta para trabajar en conjunto (lo corres en la carpeta raíz). |
+| `ozali workspace` *(deprecado)* | Configura varios repos de una carpeta para trabajar en conjunto (lo corres en la carpeta raíz). |
 | `ozali doctor` | Revisa que todo esté bien. Es solo lectura, no cambia nada. |
 | `ozali update` | Actualiza skill ozali + ozali-jarvis + permisos; detecta Engram faltante y skills globales ausentes. |
 | `ozali sync` | Sube el histórico/memoria al repo de equipo. |
@@ -183,7 +183,9 @@ histórico local de `.ozali/docs/`.
 
 ---
 
-## Trabajar con varios repos a la vez (`ozali workspace`)
+## Trabajar con varios repos a la vez (`ozali workspace`) — deprecado
+
+> ⚠️ **Deprecado:** `ozali workspace` se quitará próximamente. Sigue funcionando por ahora; usa `ozali init` / `ozali update` en cada repo.
 
 ¿Tienes una carpeta que agrupa **varios repositorios que se hablan entre sí** (una API, su front, una
 librería compartida) y quieres que tu agente trabaje con todos juntos? Corre **una vez** en esa

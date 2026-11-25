@@ -261,13 +261,11 @@ function defaultAgentsConfig() {
 }
 
 /**
- * Inicializa (o reconfigura) únicamente el repo de conocimiento y el config mínimo.
- * Reutilizable por `init --knowledge-only`, `doctor --fix`, etc.
+ * Garantiza que el repo de conocimiento exista (carpeta + git + projects/ + engram/).
+ * Idempotente; compartido por `init` y `update`. Devuelve la ruta absoluta resuelta.
  */
-async function initKnowledgeRepo(cwd, opts, extraConfig = {}, explicitRepo = null) {
-  const knowledgeRepoRaw = explicitRepo || opts.knowledgeRepo || await ask("Ruta del repo de conocimiento (histórico aislado)", DEFAULT_KNOWLEDGE);
+async function ensureKnowledgeRepo(cwd, knowledgeRepoRaw) {
   const knowledgeRepo = fromPortablePath(knowledgeRepoRaw, cwd);
-
   ensureDir(knowledgeRepo);
   if (!exists(path.join(knowledgeRepo, ".git"))) {
     if (await confirm(`¿Inicializo git en el repo de conocimiento (${knowledgeRepo})?`, true)) {
@@ -277,6 +275,16 @@ async function initKnowledgeRepo(cwd, opts, extraConfig = {}, explicitRepo = nul
       ok("Repo de conocimiento inicializado.");
     }
   } else info("Repo de conocimiento ya existe.");
+  return knowledgeRepo;
+}
+
+/**
+ * Inicializa (o reconfigura) únicamente el repo de conocimiento y el config mínimo.
+ * Reutilizable por `init --knowledge-only`, `doctor --fix`, etc.
+ */
+async function initKnowledgeRepo(cwd, opts, extraConfig = {}, explicitRepo = null) {
+  const knowledgeRepoRaw = explicitRepo || opts.knowledgeRepo || await ask("Ruta del repo de conocimiento (histórico aislado)", DEFAULT_KNOWLEDGE);
+  const knowledgeRepo = await ensureKnowledgeRepo(cwd, knowledgeRepoRaw);
 
   const existing = readJSON(CONFIG_PATH(cwd)) || {};
   const config = {
@@ -471,7 +479,7 @@ export async function init(cwd, opts) {
   // 2) perfiles base de permisos (idempotentes, merge mínimo) por agente
   if (agent === "claude-code" || agent === "both") {
     ensureClaudeCodeProfile(cwd, scope);
-    if (scope !== "global") ensureUsageHooks(cwd);
+    ensureUsageHooks(cwd); // los hooks son del repo: no dependen de dónde viven las skills (issue #3)
     // Claude Code ignora los permisos de un .claude/settings.json de proyecto hasta confiar en él.
     if (scope === "project" && !opts.noTrust) await ensureClaudeWorkspaceTrust(cwd, opts);
   }
@@ -1765,6 +1773,12 @@ export async function doctor(cwd, opts = {}) {
   add("Skill ozali instalada", env.skill.installed, env.skill.installed ? env.skill.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   add("Skill skill-generator", env.skillGenerator.installed, env.skillGenerator.installed ? env.skillGenerator.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init)");
   add("Skill ozali-commit", env.ozaliCommit.installed, env.ozaliCommit.installed ? env.ozaliCommit.paths.map((p) => path.relative(cwd, p) || p).join(", ") : "no instalada (ozali init / ozali skills install)");
+  // Hooks de usage: solo si el agente resuelto usa Claude Code (misma regla que `update`).
+  {
+    const usageAgent = (cfg && cfg.agent) || (env.agents.opencode.present && !env.agents.claudeCode.present ? "opencode"
+      : env.agents.claudeCode.present && env.agents.opencode.present ? "both" : "claude-code");
+    if (usageAgent === "claude-code" || usageAgent === "both") { const u = usageHooksRow(cwd); add(u.label, u.good, u.detail); }
+  }
   // Skill cdk (la genera el agente): versión de contrato vs. la vigente del paquete.
   const cdkInfo = detectCdk(cwd);
   const cdkN = cdkCanonicalVersion();
@@ -2379,7 +2393,7 @@ export async function update(cwd, opts = {}) {
   await migrateLegacySkills(cwd, opts, agent, scope);
 
   // 2) Perfiles base de permisos (idempotente: recoge defaults nuevos del paquete)
-  if (agent === "claude-code" || agent === "both") { ensureClaudeCodeProfile(cwd, scope); if (scope !== "global") ensureUsageHooks(cwd); }
+  if (agent === "claude-code" || agent === "both") { ensureClaudeCodeProfile(cwd, scope); ensureUsageHooks(cwd); }
   if (agent === "opencode" || agent === "both") ensureOpencodeProfile(cwd);
 
   // 3) ozali-jarvis: crea el orquestador en repos previos a 0.4.0 y refresca el resto.
@@ -2406,6 +2420,17 @@ export async function update(cwd, opts = {}) {
         info("  " + c.bold(".ozali/metrics/") + " ya estaba versionado: agregar la regla no lo destrackea.");
         info("  Para sacarlo del índice sin borrarlo del disco: " + c.bold("git rm -r --cached .ozali/metrics"));
       }
+    }
+  }
+
+  // 3.6) Repo de conocimiento: lo crea si no existe y lo integra al config si faltaba.
+  if (cfg) {
+    const raw = cfg.knowledgeRepo || opts.knowledgeRepo || DEFAULT_KNOWLEDGE;
+    await ensureKnowledgeRepo(cwd, raw);
+    if (!cfg.knowledgeRepo) {
+      cfg.knowledgeRepo = toPortablePath(fromPortablePath(raw, cwd), cwd); // en memoria: la escritura final de update lo conserva
+      writeJSON(cfgPath, cfg);
+      ok(`Repo de conocimiento integrado al config (${c.bold(".ozali/config.json")}).`);
     }
   }
 
@@ -3636,9 +3661,19 @@ export async function usageCommand(cwd, opts = {}) {
 
 const USAGE_HOOK_CMD = "command -v ozali >/dev/null 2>&1 && ozali usage hook || true";
 
+/** Fila de `doctor`: ¿están los 3 hooks de `ozali usage hook` en el settings del proyecto? */
+export function usageHooksRow(cwd) {
+  const cfg = readJSON(path.join(cwd, ".claude", "settings.json"), {});
+  const hooks = (cfg && cfg.hooks) || {};
+  const missing = ["PreToolUse", "UserPromptSubmit", "SessionEnd"].filter((evt) => !JSON.stringify(hooks[evt] || []).includes("ozali usage hook"));
+  return missing.length === 0
+    ? { label: "Hooks de usage", good: true, detail: "PreToolUse, UserPromptSubmit, SessionEnd" }
+    : { label: "Hooks de usage", good: false, detail: `faltan en .claude/settings.json: ${missing.join(", ")} → corre 'ozali update'` };
+}
+
 /**
  * Hooks que arrancan la medición de tokens al invocar `cdk` y la pausan al cerrar la sesión
- * (idempotente; conserva los hooks del usuario). Solo en el settings del proyecto.
+ * (idempotente; conserva los hooks del usuario). Solo en el settings del proyecto, con cualquier scope de skills.
  */
 function ensureUsageHooks(cwd) {
   const p = path.join(cwd, ".claude", "settings.json");
