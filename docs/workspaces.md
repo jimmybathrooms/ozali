@@ -2,6 +2,8 @@
 
 ← [README](../README.md)
 
+> ⚠️ **Deprecado.** `ozali workspace` se quitará próximamente. Sigue funcionando por ahora (y avisa al correrlo); el camino a futuro es `ozali init` / `ozali update` por repo.
+
 Objetivo: cuando abres en tu editor (VSCode, **Antigravity** — ambos de la familia VSCode) una
 **carpeta raíz que agrupa varios repositorios relacionados** (una API, su front, librerías
 compartidas), que el agente pueda **trabajar en conjunto** con todos, porque tienen **referencias

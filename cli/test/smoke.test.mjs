@@ -1837,6 +1837,19 @@ test("cdk-contract.md declara la v8 con el cierre por ozali state / ozali clean 
   }
 });
 
+test("cdk-contract.md: marcador, texto 'vigente' y último changelog declaran la misma versión", () => {
+  const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "cdk-contract.md"), "utf8");
+  const marker = txt.match(/CDK_CONTRACT_VERSION:\s*(\d+)/);
+  assert.ok(marker, "hay marcador CDK_CONTRACT_VERSION");
+  const prose = txt.match(/Versión de contrato vigente:\s*`(\d+)`/);
+  assert.ok(prose, "hay línea 'Versión de contrato vigente: `N`'");
+  const versions = [...txt.matchAll(/^### v(\d+)\b/gm)].map((m) => parseInt(m[1], 10));
+  assert.ok(versions.length > 0, "hay entradas ### vN en el changelog");
+  const last = Math.max(...versions);
+  assert.equal(parseInt(prose[1], 10), parseInt(marker[1], 10), "el texto 'vigente' coincide con el marcador");
+  assert.equal(last, parseInt(marker[1], 10), "la última entrada del changelog coincide con el marcador");
+});
+
 test("las plantillas por hito exigen huella de autoría (GitHub + commit) en los 6 documentos", () => {
   const txt = fs.readFileSync(path.join(PKG_ROOT, "skill", "references", "doc-templates.md"), "utf8");
   assert.match(txt, /GitHub: @<login/);
@@ -2135,6 +2148,121 @@ test("init instala los hooks de medición de tokens (idempotente, conserva los d
     assert.equal(count("PreToolUse"), 1); assert.equal(count("UserPromptSubmit"), 1); assert.equal(count("SessionEnd"), 1);
     assert.equal(cfg.hooks.PreToolUse.find((h) => JSON.stringify(h).includes("ozali usage hook")).matcher, "Skill");
     assert.match(JSON.stringify(cfg.hooks.SessionEnd), /echo mio/, "no pisa el hook del usuario");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("init con --scope global también instala los hooks de medición de tokens (issue #3)", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "global", "--knowledge-repo", path.join(dir, ".k")], dir);
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.json"), "utf8"));
+    const count = (evt) => JSON.stringify(cfg.hooks?.[evt] ?? []).split("ozali usage hook").length - 1;
+    assert.equal(count("PreToolUse"), 1); assert.equal(count("UserPromptSubmit"), 1); assert.equal(count("SessionEnd"), 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("update con scope global repone los hooks de medición de tokens que faltan (issue #3)", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "global", "--knowledge-repo", path.join(dir, ".k")], dir);
+    fs.rmSync(path.join(dir, ".claude", "settings.json"), { force: true });
+    run(["update", "--yes", "--agent", "claude-code", "--scope", "global"], dir);
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.json"), "utf8"));
+    assert.match(JSON.stringify(cfg.hooks), /ozali usage hook/);
+    assert.equal(JSON.stringify(cfg.hooks).split("ozali usage hook").length - 1, 3, "3 hooks, sin duplicar");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("update crea el repo de conocimiento si no existe (git + projects/ + engram/)", () => {
+  const dir = tmpProject();
+  try {
+    const k = path.join(dir, ".k");
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "global", "--knowledge-repo", k], dir);
+    fs.rmSync(k, { recursive: true, force: true });
+    const { stdout } = run(["update", "--yes", "--agent", "claude-code"], dir);
+    assert.ok(fs.existsSync(path.join(k, ".git")), "git inicializado");
+    assert.ok(fs.existsSync(path.join(k, "projects")) && fs.existsSync(path.join(k, "engram")));
+    assert.match(stdout, /[Rr]epo de conocimiento/);
+    const again = run(["update", "--yes", "--agent", "claude-code"], dir).stdout;
+    assert.match(again, /Repo de conocimiento ya existe/, "idempotente");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("update integra el repo de conocimiento en repos cuyo config no lo traía", () => {
+  const dir = tmpProject();
+  try {
+    run(["init", "--yes", "--no-engram", "--no-trust", "--no-jarvis", "--agent", "claude-code", "--scope", "global", "--knowledge-repo", path.join(dir, ".k")], dir);
+    const cfgPath = path.join(dir, ".ozali", "config.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    delete cfg.knowledgeRepo; fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    const k2 = path.join(dir, ".k2");
+    run(["update", "--yes", "--agent", "claude-code", "--knowledge-repo", k2], dir);
+    assert.ok(JSON.parse(fs.readFileSync(cfgPath, "utf8")).knowledgeRepo, "config recupera knowledgeRepo");
+    assert.ok(fs.existsSync(path.join(k2, ".git")));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("workspace avisa que está deprecado (y sigue funcionando)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-ws-"));
+  try {
+    wsRepo(root, "api", { config: true, cdk: true, pkg: { name: "api", version: "1.0.0" } });
+    const { stdout } = run(["workspace", "--dry-run"], root);
+    assert.match(stdout, /workspace.*deprecado/i);
+    assert.match(stdout, /se quitará/i);
+    assert.match(stdout, /no escribo nada/, "sigue operativo");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("usageHook es idempotente: disparar start y SessionEnd dos veces con la misma sesión no duplica ni reabre segmentos (hooks global + proyecto)", async () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".ozali"), { recursive: true });
+    const start = JSON.stringify({ hook_event_name: "PreToolUse", session_id: "s1", tool_name: "Skill", tool_input: { skill: "cdk" } });
+    const end = JSON.stringify({ hook_event_name: "SessionEnd", session_id: "s1" });
+    await usageHook(dir, start); await usageHook(dir, start);
+    let segs = readLedgerT(dir).hitos["_sin-hito"].segments;
+    assert.equal(segs.length, 1, "start doble = un solo segmento");
+    await usageHook(dir, end);
+    const cerrado = readLedgerT(dir).hitos["_sin-hito"].segments[0].end;
+    assert.ok(cerrado, "primer SessionEnd cierra");
+    await usageHook(dir, end);
+    segs = readLedgerT(dir).hitos["_sin-hito"].segments;
+    assert.equal(segs.length, 1, "pause doble no crea segmentos");
+    assert.equal(segs[0].end, cerrado, "pause doble no cambia el cierre");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+import { usageHooksRow, usageHooksDuplicated } from "../lib/commands.mjs";
+
+test("usageHooksDuplicated: detecta hooks de usage tanto en ~/.claude como en el proyecto (issue #3)", () => {
+  const dir = tmpProject(); const home = fs.mkdtempSync(path.join(os.tmpdir(), "ozali-home-"));
+  try {
+    const cmd = "command -v ozali >/dev/null 2>&1 && ozali usage hook || true";
+    const settings = JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: cmd }] }] } });
+    const put = (base) => { fs.mkdirSync(path.join(base, ".claude"), { recursive: true }); fs.writeFileSync(path.join(base, ".claude", "settings.json"), settings); };
+    assert.equal(usageHooksDuplicated(dir, home), false, "ninguno");
+    put(dir); assert.equal(usageHooksDuplicated(dir, home), false, "solo proyecto");
+    put(home); assert.equal(usageHooksDuplicated(dir, home), true, "global + proyecto");
+    fs.rmSync(path.join(dir, ".claude"), { recursive: true });
+    assert.equal(usageHooksDuplicated(dir, home), false, "solo global");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("usageHooksRow: detecta hooks de usage ausentes/parciales/completos y sugiere ozali update (issue #3)", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(usageHooksRow(dir).good, false, "sin settings.json → falta");
+    assert.match(usageHooksRow(dir).detail, /ozali update/);
+    const cmd = "command -v ozali >/dev/null 2>&1 && ozali usage hook || true";
+    const h = [{ hooks: [{ type: "command", command: cmd }] }];
+    fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+    const p = path.join(dir, ".claude", "settings.json");
+    fs.writeFileSync(p, JSON.stringify({ hooks: { SessionEnd: h } }));
+    const parcial = usageHooksRow(dir);
+    assert.equal(parcial.good, false);
+    assert.match(parcial.detail, /PreToolUse/); assert.match(parcial.detail, /UserPromptSubmit/);
+    fs.writeFileSync(p, JSON.stringify({ hooks: { PreToolUse: h, UserPromptSubmit: h, SessionEnd: h } }));
+    assert.equal(usageHooksRow(dir).good, true);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

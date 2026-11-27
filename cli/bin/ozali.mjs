@@ -33,7 +33,7 @@ ${c.bold("Comandos:")}
   install-engram
             Instala (o reinstala) Engram bajo demanda, registra su MCP en el agente
             y activa modo hybrid. Úsalo cuando saltaste la instalación en init.
-  workspace Multi-repo: toma los repos de la carpeta raíz (y los folders de un
+  workspace [DEPRECADO — se quitará próximamente] Multi-repo: toma los repos de la carpeta raíz (y los folders de un
             *.code-workspace de VSCode/Antigravity), remedia los que no tienen ozali init,
             guía la calibración y escribe la config para trabajar en conjunto.
             Con --doctor / --update opera sobre TODOS los repos miembros desde la raíz.
@@ -196,7 +196,9 @@ async function main() {
   if (cmd !== "state" && cmd !== "usage") console.log(`${c.bold("ozali")} ${c.dim("v" + pkgVersion())}`);
   switch (cmd) {
     case "init": return await init(cwd, opts);
-    case "workspace": return await workspace(cwd, opts);
+    case "workspace":
+      warn(`${c.bold("ozali workspace")} está deprecado y se quitará próximamente. Sigue funcionando por ahora; migra a ${c.bold("ozali init / ozali update")} por repo.`);
+      return await workspace(cwd, opts);
     case "doctor": return await doctor(cwd, opts);
     case "update": return await update(cwd, opts);
     case "sync": return await sync(cwd, opts);
